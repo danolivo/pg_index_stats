@@ -1,0 +1,79 @@
+CREATE EXTENSION pg_index_stats;
+SET pg_index_stats.auto = 'false';
+CREATE TABLE test(x int, y numeric);
+CREATE INDEX abc1 ON test(x,(y*y));
+CREATE INDEX abc2 ON test(x,y);
+SELECT build_extended_statistic('abc2');
+ build_extended_statistic 
+--------------------------
+ t
+(1 row)
+
+\d test
+                Table "public.test"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ x      | integer |           |          | 
+ y      | numeric |           |          | 
+Indexes:
+    "abc1" btree (x, (y * y))
+    "abc2" btree (x, y)
+Statistics objects:
+    "public.test_x_y_stat" ON x, y FROM test
+
+SELECT build_extended_statistic('abc1');
+ build_extended_statistic 
+--------------------------
+ t
+(1 row)
+
+\d test
+                Table "public.test"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ x      | integer |           |          | 
+ y      | numeric |           |          | 
+Indexes:
+    "abc1" btree (x, (y * y))
+    "abc2" btree (x, y)
+Statistics objects:
+    "public.test_x_expr_stat" ON x, (y * y) FROM test
+    "public.test_x_y_stat" ON x, y FROM test
+
+REINDEX INDEX abc2;
+REINDEX INDEX CONCURRENTLY abc1;
+\d test
+                Table "public.test"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ x      | integer |           |          | 
+ y      | numeric |           |          | 
+Indexes:
+    "abc1" btree (x, (y * y))
+    "abc2" btree (x, y)
+Statistics objects:
+    "public.test_x_expr_stat" ON x, (y * y) FROM test
+    "public.test_x_y_stat" ON x, y FROM test
+
+DROP INDEX abc2;
+\d test
+                Table "public.test"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ x      | integer |           |          | 
+ y      | numeric |           |          | 
+Indexes:
+    "abc1" btree (x, (y * y))
+Statistics objects:
+    "public.test_x_expr_stat" ON x, (y * y) FROM test
+
+DROP EXTENSION pg_index_stats;
+\d test
+                Table "public.test"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ x      | integer |           |          | 
+ y      | numeric |           |          | 
+Indexes:
+    "abc1" btree (x, (y * y))
+
