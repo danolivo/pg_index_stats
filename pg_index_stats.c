@@ -1,5 +1,6 @@
 #include "postgres.h"
 
+#include "access/nbtree.h"
 #include "access/relation.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
@@ -78,9 +79,15 @@ build_extended_statistic_int(Relation rel)
 	indexId = RelationGetRelid(rel);
 	indexInfo = BuildIndexInfo(rel);
 
-	if (indexInfo->ii_NumIndexKeyAttrs < 2)
+	/*
+	 * Forbid any other indexes except btree just to be sure we have specific
+	 * operator for each variable in the statistics.
+	 * TODO:
+	 * 1) Is not enough for expressions?
+	 * 2) Should we ease it for manual mode?
+	 */
+	if (indexInfo->ii_Am != BTREE_AM_OID || indexInfo->ii_NumIndexKeyAttrs < 2)
 	{
-//		FreeTupleDesc(tupdesc);
 		pfree(indexInfo);
 		return false;
 	}
@@ -94,6 +101,7 @@ build_extended_statistic_int(Relation rel)
 		RangeVar		   *from;
 		int					i;
 		Relation			hrel;
+		Bitmapset		   *atts_used = NULL;
 
 		heapId = IndexGetRelation(indexId, false);
 		hrel = relation_open(heapId, AccessShareLock);
@@ -124,8 +132,13 @@ build_extended_statistic_int(Relation rel)
 
 			if (atnum != 0)
 			{
+				if (bms_is_member(atnum, atts_used))
+					/* Can't build extended statistics with column duplicates */
+					continue;
+
 				selem->name = pstrdup(tupdesc->attrs[atnum - 1].attname.data);
 				selem->expr = NULL;
+				atts_used = bms_add_member(atts_used, atnum);
 			}
 			else
 			{
@@ -139,6 +152,14 @@ build_extended_statistic_int(Relation rel)
 			}
 
 			stmt->exprs = lappend(stmt->exprs, selem);
+		}
+
+		if (list_length(stmt->exprs) < 2)
+		{
+			/* Extended statistics can be made only for two or more expressions */
+			FreeTupleDesc(tupdesc);
+			pfree(indexInfo);
+			return false;
 		}
 
 		/* Still only one relation allowed in the core */
