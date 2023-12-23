@@ -75,6 +75,19 @@ build_extended_statistic_int(Relation rel)
 	IndexInfo	   *indexInfo;
 	ObjectAddress	obj;
 	Oid				extoid = get_extension_oid(EXTENSION_NAME, true);
+	Oid				save_userid;
+	int				save_sec_context;
+	int				save_nestlevel;
+
+	/*
+	 * Switch to the table owner's userid, so that any index functions are
+	 * run as that user.  Also lock down security-restricted operations
+	 * and arrange to make GUC variable changes local to this command.
+	 */
+	GetUserIdAndSecContext(&save_userid, &save_sec_context);
+	SetUserIdAndSecContext(rel->rd_rel->relowner,
+						   save_sec_context | SECURITY_RESTRICTED_OPERATION);
+	save_nestlevel = NewGUCNestLevel();
 
 	indexId = RelationGetRelid(rel);
 	indexInfo = BuildIndexInfo(rel);
@@ -88,6 +101,8 @@ build_extended_statistic_int(Relation rel)
 	 */
 	if (indexInfo->ii_Am != BTREE_AM_OID || indexInfo->ii_NumIndexKeyAttrs < 2)
 	{
+		AtEOXact_GUC(false, save_nestlevel);
+		SetUserIdAndSecContext(save_userid, save_sec_context);
 		pfree(indexInfo);
 		return false;
 	}
@@ -107,6 +122,9 @@ build_extended_statistic_int(Relation rel)
 		hrel = relation_open(heapId, AccessShareLock);
 		if (hrel->rd_rel->relkind != RELKIND_RELATION)
 		{
+			AtEOXact_GUC(false, save_nestlevel);
+			SetUserIdAndSecContext(save_userid, save_sec_context);
+
 			/*
 			 * Just for sure. TODO: may be better. At least for TOAST relations
 			 */
@@ -159,6 +177,10 @@ build_extended_statistic_int(Relation rel)
 			/* Extended statistics can be made only for two or more expressions */
 			FreeTupleDesc(tupdesc);
 			pfree(indexInfo);
+
+			AtEOXact_GUC(false, save_nestlevel);
+			SetUserIdAndSecContext(save_userid, save_sec_context);
+
 			return false;
 		}
 
@@ -173,6 +195,8 @@ build_extended_statistic_int(Relation rel)
 		{
 			FreeTupleDesc(tupdesc);
 			pfree(indexInfo);
+			AtEOXact_GUC(false, save_nestlevel);
+			SetUserIdAndSecContext(save_userid, save_sec_context);
 			return false;
 		}
 		else
@@ -189,10 +213,13 @@ build_extended_statistic_int(Relation rel)
 			ObjectAddressSet(refobj, RelationRelationId, indexId);
 			recordDependencyOn(&obj, &refobj, DEPENDENCY_AUTO);
 		}
+
 		list_free_deep(stmt->relations);
 		FreeTupleDesc(tupdesc);
 	}
 
+	AtEOXact_GUC(false, save_nestlevel);
+	SetUserIdAndSecContext(save_userid, save_sec_context);
 	pfree(indexInfo);
 	return true;
 }
