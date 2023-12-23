@@ -61,6 +61,10 @@ build_extended_statistic(PG_FUNCTION_ARGS)
 	PG_RETURN_BOOL(result);
 }
 
+/*
+ * Use index and its description for creating definition of extended statistics
+ * expression.
+ */
 static bool
 build_extended_statistic_int(Relation rel)
 {
@@ -72,12 +76,11 @@ build_extended_statistic_int(Relation rel)
 	Oid				extoid = get_extension_oid(EXTENSION_NAME, true);
 
 	indexId = RelationGetRelid(rel);
-	tupdesc = CreateTupleDescCopy(RelationGetDescr(rel));
 	indexInfo = BuildIndexInfo(rel);
 
 	if (indexInfo->ii_NumIndexKeyAttrs < 2)
 	{
-		FreeTupleDesc(tupdesc);
+//		FreeTupleDesc(tupdesc);
 		pfree(indexInfo);
 		return false;
 	}
@@ -103,6 +106,7 @@ build_extended_statistic_int(Relation rel)
 			return false;
 		}
 
+		tupdesc = CreateTupleDescCopy(RelationGetDescr(hrel));
 		from = makeRangeVar(get_namespace_name(RelationGetNamespace(hrel)),
 								pstrdup(RelationGetRelationName(hrel)), -1),
 		relation_close(hrel, AccessShareLock);
@@ -120,7 +124,7 @@ build_extended_statistic_int(Relation rel)
 
 			if (atnum != 0)
 			{
-				selem->name = pstrdup(tupdesc->attrs[i].attname.data);
+				selem->name = pstrdup(tupdesc->attrs[atnum - 1].attname.data);
 				selem->expr = NULL;
 			}
 			else
@@ -165,9 +169,9 @@ build_extended_statistic_int(Relation rel)
 			recordDependencyOn(&obj, &refobj, DEPENDENCY_AUTO);
 		}
 		list_free_deep(stmt->relations);
+		FreeTupleDesc(tupdesc);
 	}
 
-	FreeTupleDesc(tupdesc);
 	pfree(indexInfo);
 	return true;
 }
