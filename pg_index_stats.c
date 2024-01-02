@@ -35,6 +35,35 @@ static List *index_candidates = NIL;
 
 static bool build_extended_statistic_int(Relation rel);
 
+static bool _create_statistics(CreateStatsStmt *stmt, Oid indexId)
+{
+	ObjectAddress	obj;
+	ObjectAddress	refobj;
+	Oid				extoid;
+
+	obj = CreateStatistics(stmt);
+	if (!OidIsValid(obj.classId))
+		return false;
+
+	extoid = get_extension_oid(EXTENSION_NAME, true);
+
+	/* Add dependency on the extension and the index */
+	if (OidIsValid(extoid))
+	{
+		/*
+		 * If the extension wasn't created in the database, statostics will
+		 * depend on the index relation only.
+		 */
+		ObjectAddressSet(refobj, ExtensionRelationId, extoid);
+		recordDependencyOn(&obj, &refobj, DEPENDENCY_AUTO);
+	}
+
+	ObjectAddressSet(refobj, RelationRelationId, indexId);
+	recordDependencyOn(&obj, &refobj, DEPENDENCY_AUTO);
+
+	return true;
+}
+
 /*
  * generateClonedExtStatsStmt
  */
@@ -69,15 +98,14 @@ build_extended_statistic(PG_FUNCTION_ARGS)
 static bool
 build_extended_statistic_int(Relation rel)
 {
-	TupleDesc		tupdesc;
+	TupleDesc		tupdesc = NULL;
 	Oid				indexId;
 	Oid				heapId;
-	IndexInfo	   *indexInfo;
-	ObjectAddress	obj;
-	Oid				extoid = get_extension_oid(EXTENSION_NAME, true);
+	IndexInfo	   *indexInfo = NULL;
 	Oid				save_userid;
 	int				save_sec_context;
 	int				save_nestlevel;
+	bool			result = false;
 
 	/*
 	 * Switch to the table owner's userid, so that any index functions are
@@ -127,14 +155,11 @@ build_extended_statistic_int(Relation rel)
 		 */
 		if (hrel->rd_rel->relkind != RELKIND_RELATION)
 		{
-			AtEOXact_GUC(false, save_nestlevel);
-			SetUserIdAndSecContext(save_userid, save_sec_context);
-
 			/*
 			 * Just for sure. TODO: may be better. At least for TOAST relations
 			 */
 			relation_close(hrel, AccessShareLock);
-			return false;
+			goto cleanup;
 		}
 
 		tupdesc = CreateTupleDescCopy(RelationGetDescr(hrel));
@@ -178,55 +203,100 @@ build_extended_statistic_int(Relation rel)
 		}
 
 		if (list_length(stmt->exprs) < 2)
-		{
 			/* Extended statistics can be made only for two or more expressions */
-			FreeTupleDesc(tupdesc);
-			pfree(indexInfo);
-
-			AtEOXact_GUC(false, save_nestlevel);
-			SetUserIdAndSecContext(save_userid, save_sec_context);
-
-			return false;
-		}
+			goto cleanup;
 
 		/* Still only one relation allowed in the core */
 		stmt->relations = list_make1(from);
 		stmt->stxcomment = EXTENSION_NAME" - multivariate statistics";
 		stmt->transformed = false;	/* true when transformStatsStmt is finished */
-		stmt->if_not_exists = false;
+		stmt->if_not_exists = true;
 
-		obj = CreateStatistics(stmt);
-		if (!OidIsValid(obj.classId))
-		{
-			FreeTupleDesc(tupdesc);
-			pfree(indexInfo);
-			AtEOXact_GUC(false, save_nestlevel);
-			SetUserIdAndSecContext(save_userid, save_sec_context);
-			return false;
-		}
-		else
-		{
-			ObjectAddress refobj;
+		if (!_create_statistics(stmt, indexId))
+			goto cleanup;
 
-			/* Add dependency on the extension and the index */
-			if (OidIsValid(extoid))
+		/* Univariate statistics */
+		{
+			RowExpr	   *rowexpr = makeNode(RowExpr);
+			StatsElem  *selem = makeNode(StatsElem);
+
+			/* Need to see results of previously inserted statistics */
+			CommandCounterIncrement();
+
+			indexpr_item = list_head(indexInfo->ii_Expressions);
+			rowexpr->args = NIL;
+			bms_free(atts_used);
+			atts_used = NULL;
+
+			for (i = 0; i < indexInfo->ii_NumIndexKeyAttrs; i++)
 			{
-				ObjectAddressSet(refobj, ExtensionRelationId, extoid);
-				recordDependencyOn(&obj, &refobj, DEPENDENCY_AUTO);
+				AttrNumber	atnum = indexInfo->ii_IndexAttrNumbers[i];
+
+				if (atnum != 0)
+				{
+					Var		   *varnode;
+
+					if (bms_is_member(atnum, atts_used))
+						/* Can't build extended statistics with column duplicates */
+						continue;
+
+					varnode = makeVar(1, /* I see this trick in the code around.
+										  * But it would be better get to know
+										  * what does this magic number means
+										  * exactly.
+										  */
+									  atnum,
+									  tupdesc->attrs[atnum - 1].atttypid,
+									  tupdesc->attrs[atnum - 1].atttypmod,
+									  tupdesc->attrs[atnum - 1].attcollation,
+									  0);
+					varnode->location = -1;
+					rowexpr->args = lappend(rowexpr->args, varnode);
+					atts_used = bms_add_member(atts_used, atnum);
+				}
+				else
+				{
+					Node	   *indexkey;
+
+					indexkey = (Node *) lfirst(indexpr_item);
+					Assert(indexkey != NULL);
+					indexpr_item = lnext(indexInfo->ii_Expressions, indexpr_item);
+					rowexpr->args = lappend(rowexpr->args, indexkey);
+				}
 			}
 
-			ObjectAddressSet(refobj, RelationRelationId, indexId);
-			recordDependencyOn(&obj, &refobj, DEPENDENCY_AUTO);
+			rowexpr->row_typeid = RECORDOID;
+			rowexpr->row_format = COERCE_IMPLICIT_CAST;
+			rowexpr->colnames = NIL;
+			rowexpr->location = -1;
+
+			selem->name = NULL;
+			selem->expr = (Node *) rowexpr;
+			stmt->stxcomment = EXTENSION_NAME" - univariate statistics";
+			stmt->stat_types = NIL; /* not needed for a single expression */
+
+			list_free(stmt->exprs);
+			stmt->exprs = list_make1(selem);
+			if (!_create_statistics(stmt, indexId))
+				goto cleanup;
 		}
 
 		list_free_deep(stmt->relations);
-		FreeTupleDesc(tupdesc);
 	}
+
+	result = true;
+
+cleanup:
+
+	if (indexInfo)
+		pfree(indexInfo);
+	if (tupdesc)
+		FreeTupleDesc(tupdesc);
 
 	AtEOXact_GUC(false, save_nestlevel);
 	SetUserIdAndSecContext(save_userid, save_sec_context);
-	pfree(indexInfo);
-	return true;
+
+	return result;
 }
 
 /*
