@@ -41,7 +41,9 @@ static const struct config_enum_entry format_options[] = {
 	{"multivariate", MODE_MULTIVARIATE, false},
 	{NULL, 0, false}
 };
+
 static int extstat_autogen_mode = MODE_MULTIVARIATE;
+static int extstat_columns_limit = 5;
 
 void _PG_init(void);
 
@@ -151,12 +153,7 @@ build_extended_statistic_int(Relation rel)
 	 * 2) Should we ease it for manual mode?
 	 */
 	if (indexInfo->ii_Am != BTREE_AM_OID || indexInfo->ii_NumIndexKeyAttrs < 2)
-	{
-		AtEOXact_GUC(false, save_nestlevel);
-		SetUserIdAndSecContext(save_userid, save_sec_context);
-		pfree(indexInfo);
-		return false;
-	}
+		goto cleanup;
 
 	/*
 	 * Here is we form a statement to build statistics.
@@ -199,7 +196,18 @@ build_extended_statistic_int(Relation rel)
 		for (i = 0; i < indexInfo->ii_NumIndexKeyAttrs; i++)
 		{
 			AttrNumber	atnum = indexInfo->ii_IndexAttrNumbers[i];
-			StatsElem  *selem = makeNode(StatsElem);
+			StatsElem  *selem;
+
+			Assert(extstat_columns_limit > 1);
+
+			if (list_length(stmt->exprs) >= extstat_columns_limit)
+			{
+				/*
+				 * To reduce risks of blind usage use only limited number of
+				 * index columns.
+				 */
+				break;
+			}
 
 			if (atnum != 0)
 			{
@@ -207,6 +215,7 @@ build_extended_statistic_int(Relation rel)
 					/* Can't build extended statistics with column duplicates */
 					continue;
 
+				selem = makeNode(StatsElem);
 				selem->name = pstrdup(tupdesc->attrs[atnum - 1].attname.data);
 				selem->expr = NULL;
 				atts_used = bms_add_member(atts_used, atnum);
@@ -215,6 +224,7 @@ build_extended_statistic_int(Relation rel)
 			{
 				Node	   *indexkey;
 
+				selem = makeNode(StatsElem);
 				indexkey = (Node *) lfirst(indexpr_item);
 				Assert(indexkey != NULL);
 				indexpr_item = lnext(indexInfo->ii_Expressions, indexpr_item);
@@ -427,8 +437,20 @@ _PG_init(void)
 							 0,
 							 NULL,
 							 NULL,
-							 NULL
-	);
+							 NULL);
+
+	DefineCustomIntVariable(EXTENSION_NAME".columns_limit",
+							"Sets the maximum number of columns involved in multivariate statistics",
+							NULL,
+							&extstat_columns_limit,
+							5,
+							2,
+							INT_MAX,
+							PGC_SUSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
 
 	next_object_access_hook = object_access_hook;
 	object_access_hook = extstat_remember_index_hook;
