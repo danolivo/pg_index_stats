@@ -229,7 +229,7 @@ build_extended_statistic_int(Relation rel)
 		stmt->if_not_exists = true;
 
 		if (extstat_autogen_mode == MODE_ALL ||
-			extstat_autogen_mode == MODE_UNIVARIATE)
+			extstat_autogen_mode == MODE_MULTIVARIATE)
 		{
 			if (!_create_statistics(stmt, indexId))
 				goto cleanup;
