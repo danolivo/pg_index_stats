@@ -120,6 +120,11 @@ build_extended_statistic_int(Relation rel)
 
 		heapId = IndexGetRelation(indexId, false);
 		hrel = relation_open(heapId, AccessShareLock);
+
+		/*
+		 * TODO: Create statistics could be applied to plain table, foreign
+		 * table or materialized VIEW.
+		 */
 		if (hrel->rd_rel->relkind != RELKIND_RELATION)
 		{
 			AtEOXact_GUC(false, save_nestlevel);
@@ -186,7 +191,7 @@ build_extended_statistic_int(Relation rel)
 
 		/* Still only one relation allowed in the core */
 		stmt->relations = list_make1(from);
-		stmt->stxcomment = NULL;
+		stmt->stxcomment = EXTENSION_NAME" - multivariate statistics";
 		stmt->transformed = false;	/* true when transformStatsStmt is finished */
 		stmt->if_not_exists = false;
 
