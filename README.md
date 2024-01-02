@@ -18,4 +18,5 @@ According to the [postgres docs](https://www.postgresql.org/docs/current/planner
 * ? Extend modes: maybe user wants only ndistincts or relatively lightweight column dependencies?
 
 # Second Thoughts
-Could we introduce some automatization here? For example, generate functional dependencies only for cases when real dependency factor on columns more than a predefined value?
+* Could we introduce some automatization here? For example, generate functional dependencies only for cases when real dependency factor on columns more than a predefined value?
+* As I can see, univariate statistics on a ROW(Index Tuple Descriptor) look cheaper and contain a whole set of columns covered by histogram and MCV. So, when the user creates an index because he knows he would use queries with clauses utilizing the index, it would be more profitable to use such statistics. Unfortunately, core PostgreSQL doesn't allow estimations on a group of columns; it is possible only for extended statistics. So, univariate statistics could be utilized know only in **PostgreSQL forks**.
