@@ -13,6 +13,7 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "tcop/utility.h"
+#include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -40,7 +41,7 @@ static const struct config_enum_entry format_options[] = {
 	{"multivariate", MODE_MULTIVARIATE, false},
 	{NULL, 0, false}
 };
-static int extstat_autogen_mode = MODE_ALL;
+static int extstat_autogen_mode = MODE_MULTIVARIATE;
 
 void _PG_init(void);
 
@@ -87,9 +88,13 @@ Datum
 build_extended_statistic(PG_FUNCTION_ARGS)
 {
 	text	   *relname = PG_GETARG_TEXT_PP(0);
+	char	   *cmode = text_to_cstring(PG_GETARG_TEXT_PP(1));
+	const char *tmpmode = GetConfigOption(EXTENSION_NAME".mode", false, true);
 	RangeVar   *relvar;
 	Relation	rel;
 	bool		result;
+
+	SetConfigOption(EXTENSION_NAME".mode", cmode, PGC_SUSET, PGC_S_SESSION);
 
 	/* Get descriptor of incoming index relation */
 	relvar = makeRangeVarFromNameList(textToQualifiedNameList(relname));
@@ -104,6 +109,8 @@ build_extended_statistic(PG_FUNCTION_ARGS)
 
 	result = build_extended_statistic_int(rel);
 	relation_close(rel, AccessShareLock);
+
+	SetConfigOption(EXTENSION_NAME".mode", tmpmode, PGC_SUSET, PGC_S_SESSION);
 	PG_RETURN_BOOL(result);
 }
 
@@ -414,7 +421,7 @@ _PG_init(void)
 							 "Mode of extended statistics creation on new index.",
 							 NULL,
 							 &extstat_autogen_mode,
-							 MODE_ALL,
+							 MODE_MULTIVARIATE,
 							 format_options,
 							 PGC_SUSET,
 							 0,

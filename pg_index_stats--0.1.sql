@@ -7,7 +7,9 @@
 -- Manually create extended statistics using an index as a definition of
 -- expression
 --
-CREATE FUNCTION pg_catalog.build_extended_statistic(idxname text)
+CREATE FUNCTION pg_catalog.build_extended_statistic(
+											idxname text,
+											mode text DEFAULT 'multivariate')
 RETURNS boolean
 AS 'MODULE_PATHNAME', 'build_extended_statistic'
 LANGUAGE C VOLATILE STRICT;

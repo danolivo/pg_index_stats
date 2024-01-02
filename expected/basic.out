@@ -1,5 +1,5 @@
 CREATE EXTENSION pg_index_stats;
-SET pg_index_stats.auto = 'false';
+SET pg_index_stats.mode = 'disabled';
 CREATE TABLE test(x int, y numeric);
 CREATE INDEX abc1 ON test(x,(y*y));
 CREATE INDEX abc2 ON test(x,y);
