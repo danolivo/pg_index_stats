@@ -14,3 +14,5 @@ Each created statistics depends on the index and the `pg_index_stats` extension.
 * ? After CREATE EXTENSION scan the database and create statistics whenever possible.
 * ? Restrict the shared library activity by databases where the extension was created.
 * ? Extend modes: maybe user wants only ndistincts or relatively lightweight column dependencies?
+
+Could we introduce some automatization here? For example, generate functional dependencies only for cases when real dependency factor on columns more than a predefined value?
