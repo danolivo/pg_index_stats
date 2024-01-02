@@ -24,7 +24,23 @@ PG_FUNCTION_INFO_V1(build_extended_statistic);
 
 #define EXTENSION_NAME "pg_index_stats"
 
-static bool extstat_autogen = true;
+typedef enum
+{
+	MODE_DISABLED,
+	MODE_ALL,
+	MODE_UNIVARIATE,
+	MODE_MULTIVARIATE,
+}	pg_index_stats_mode;
+
+/* GUC variables */
+static const struct config_enum_entry format_options[] = {
+	{"disabled", MODE_DISABLED, false},
+	{"all", MODE_ALL, false},
+	{"univariate", MODE_UNIVARIATE, false},
+	{"multivariate", MODE_MULTIVARIATE, false},
+	{NULL, 0, false}
+};
+static int extstat_autogen_mode = MODE_ALL;
 
 void _PG_init(void);
 
@@ -212,10 +228,16 @@ build_extended_statistic_int(Relation rel)
 		stmt->transformed = false;	/* true when transformStatsStmt is finished */
 		stmt->if_not_exists = true;
 
-		if (!_create_statistics(stmt, indexId))
-			goto cleanup;
+		if (extstat_autogen_mode == MODE_ALL ||
+			extstat_autogen_mode == MODE_UNIVARIATE)
+		{
+			if (!_create_statistics(stmt, indexId))
+				goto cleanup;
+		}
 
 		/* Univariate statistics */
+		if (extstat_autogen_mode == MODE_ALL ||
+			extstat_autogen_mode == MODE_UNIVARIATE)
 		{
 			RowExpr	   *rowexpr = makeNode(RowExpr);
 			StatsElem  *selem = makeNode(StatsElem);
@@ -313,7 +335,7 @@ extstat_remember_index_hook(ObjectAccessType access, Oid classId,
 	if (next_object_access_hook)
 		(*next_object_access_hook) (access, classId, objectId, subId, arg);
 
-	if (!extstat_autogen || !IsNormalProcessingMode() ||
+	if (extstat_autogen_mode == MODE_DISABLED || !IsNormalProcessingMode() ||
 		access != OAT_POST_CREATE || classId != RelationRelationId)
 		return;
 
@@ -346,48 +368,60 @@ after_utility_extstat_creation(PlannedStmt *pstmt, const char *queryString,
 	if (!IsTransactionState() || index_candidates == NIL)
 		return;
 
-	foreach (lc, index_candidates)
+	PG_TRY();
 	{
-		Oid			reloid = lfirst_oid(lc);
-		Relation	rel;
-
-		rel = try_relation_open(reloid, AccessShareLock);
-		if (rel == NULL)
+		foreach (lc, index_candidates)
 		{
-			index_candidates = foreach_delete_current(index_candidates, lc);
-			continue;
-		}
+			Oid			reloid = lfirst_oid(lc);
+			Relation	rel;
 
-		if (!(rel->rd_rel->relkind == RELKIND_INDEX ||
-			rel->rd_rel->relkind == RELKIND_PARTITIONED_INDEX))
-		{
+			rel = try_relation_open(reloid, AccessShareLock);
+			if (rel == NULL)
+			{
+				index_candidates = foreach_delete_current(index_candidates, lc);
+				continue;
+			}
+
+			if (!(rel->rd_rel->relkind == RELKIND_INDEX ||
+				rel->rd_rel->relkind == RELKIND_PARTITIONED_INDEX))
+			{
+				index_candidates = foreach_delete_current(index_candidates, lc);
+				relation_close(rel, AccessShareLock);
+				continue;
+			}
+
+			build_extended_statistic_int(rel);
 			index_candidates = foreach_delete_current(index_candidates, lc);
 			relation_close(rel, AccessShareLock);
-			continue;
-		}
-
-		build_extended_statistic_int(rel);
-		index_candidates = foreach_delete_current(index_candidates, lc);
-		relation_close(rel, AccessShareLock);
 	}
-
-	list_free(index_candidates);
-	index_candidates = NIL;
+	}
+	PG_FINALLY();
+	{
+		/*
+		 * To avoid memory leaks and repeated errors clean list of candidates
+		 * in the case of any errors.
+		 */
+		list_free(index_candidates);
+		index_candidates = NIL;
+	}
+	PG_END_TRY();
 }
 
 void
 _PG_init(void)
 {
-	DefineCustomBoolVariable(EXTENSION_NAME".auto",
-							 "Generate indexes on index creation.",
+	DefineCustomEnumVariable(EXTENSION_NAME".mode",
+							 "Mode of extended statistics creation on new index.",
 							 NULL,
-							 &extstat_autogen,
-							 true,
+							 &extstat_autogen_mode,
+							 MODE_ALL,
+							 format_options,
 							 PGC_SUSET,
 							 0,
 							 NULL,
 							 NULL,
-							 NULL);
+							 NULL
+	);
 
 	next_object_access_hook = object_access_hook;
 	object_access_hook = extstat_remember_index_hook;
