@@ -1,3 +1,20 @@
+/*-------------------------------------------------------------------------
+ *
+ * pg_index_stats.c
+ *		Generate extended statistics on a definition of each newly created
+ *		non-system index.
+
+ * Copyright (c) 2023 Andrei Lepikhov
+ *
+ * This software may be modified and distributed under the terms
+ * of the MIT license. See the LICENSE file for details.
+ *
+ * IDENTIFICATION
+ *	  contrib/pg_sindex_stats/pg_index_stats.c
+ *
+ *-------------------------------------------------------------------------
+ */
+
 #include "postgres.h"
 
 #include "access/nbtree.h"
@@ -273,14 +290,14 @@ pg_index_stats_build_int(Relation rel)
 
 				if (atnum != 0)
 				{
-					Var		   *varnode;
+					Var   *varnode;
 
 					if (bms_is_member(atnum, atts_used))
 						/* Can't build extended statistics with column duplicates */
 						continue;
 
 					varnode = makeVar(1, /* I see this trick in the code around.
-										  * But it would be better get to know
+										  * But it would be better to get to know
 										  * what does this magic number means
 										  * exactly.
 										  */
@@ -345,7 +362,7 @@ cleanup:
  */
 static void
 extstat_remember_index_hook(ObjectAccessType access, Oid classId,
-						 Oid objectId, int subId, void *arg)
+							Oid objectId, int subId, void *arg)
 {
 	MemoryContext memctx;
 

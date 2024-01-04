@@ -3,7 +3,7 @@
 MODULE_big = pg_index_stats
 OBJS = \
 	$(WIN32RES) \
-	pg_index_stats.o
+	pg_index_stats.o extstats_extra.o
 PGFILEDESC = "pg_index_stats - create extended statistics"
 
 REGRESS = basic
