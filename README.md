@@ -6,14 +6,15 @@ According to the [postgres docs](https://www.postgresql.org/docs/current/planner
 * Enum GUC `pg_index_stats.mode` - can be set to `all`, `disabled`, `multivariate` or `univariate` values. By default, set into generation of multivariate statistics.
 * Integer GUC `pg_index_stats.columns_limit` - number of first columns of an index which will be involved in multivariate statistics creation (**default 5**).
 * Function `pg_index_stats_build(idxname, mode DEFAULT 'multivariate')` - manually create extended statistics on an expression defined by formula of the index `idxname`.
+* Function `pg_index_stats_remove()` - remove all previously automatically generated statistics.
+* Function `pg_index_stats_rebuild()` - remove old and create new extended statistics over non-system indexes existed in the database. 
 
 ## Notes
 * Each created statistics depends on the index and the `pg_index_stats` extension. Hence, dropping an index you remove corresponding auto-generated extended statistics. Dropping `pg_index_stats` extension you will remove all auto-generated statistics in the database.
 * Although multivariate case is trivial (it will be used be the core after an ANALYZE finished), univariate one (histogram and MCV on the ROW()) isn't used by the core and we should invent something - can we implement some code under the get_relation_stats_hook and/or get_index_stats_hook ?
 
 # TODO
-* In the case of indexes intersection, combine their **multivariate** statistics.
-* ? After CREATE EXTENSION scan the database and create statistics whenever possible.
+* In the case of indexes intersection, combine their **multivariate** statistics into some meta statistics.
 * ? Restrict the shared library activity by databases where the extension was created.
 * ? Extend modes: maybe user wants only ndistincts or relatively lightweight column dependencies?
 
