@@ -11,7 +11,14 @@ According to the [postgres docs](https://www.postgresql.org/docs/current/planner
 
 ## Notes
 * Each created statistics depends on the index and the `pg_index_stats` extension. Hence, dropping an index you remove corresponding auto-generated extended statistics. Dropping `pg_index_stats` extension you will remove all auto-generated statistics in the database.
-* Although multivariate case is trivial (it will be used be the core after an ANALYZE finished), univariate one (histogram and MCV on the ROW()) isn't used by the core and we should invent something - can we implement some code under the get_relation_stats_hook and/or get_index_stats_hook ?
+* Although multivariate case is trivial (it will be used by the core natively after an ANALYZE finished), univariate one (histogram and MCV on the ROW()) isn't used by the core and we should invent something - can we implement some code under the get_relation_stats_hook and/or get_index_stats_hook ?
+* For clarity, the extension adds to auto-geenrated statistics comments likewise 'pg_index_stats - multivariate statistics'. To explore all generated statistics an user can execute simple query like:
+```
+SELECT s.oid,s.stxname,d.description
+FROM  pg_statistic_ext s JOIN pg_description d ON (s.oid = d.objoid)
+WHERE description LIKE 'pg_index_stats%';
+```
+
 
 # TODO
 * In the case of indexes intersection, combine their **multivariate** statistics into some meta statistics.
