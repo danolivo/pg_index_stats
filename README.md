@@ -5,7 +5,7 @@ According to the [postgres docs](https://www.postgresql.org/docs/current/planner
 ## Interface
 * Enum GUC `pg_index_stats.mode` - can be set to `all`, `disabled`, `multivariate` or `univariate` values. By default, set into generation of multivariate statistics.
 * Integer GUC `pg_index_stats.columns_limit` - number of first columns of an index which will be involved in multivariate statistics creation (**default 5**).
-* Function `pg_index_stats_build(idxname, mode)` - manually create extended statistics on an expression defined by formula of the index `idxname`.
+* Function `pg_index_stats_build(idxname, mode DEFAULT 'multivariate')` - manually create extended statistics on an expression defined by formula of the index `idxname`.
 
 ## Notes
 * Each created statistics depends on the index and the `pg_index_stats` extension. Hence, dropping an index you remove corresponding auto-generated extended statistics. Dropping `pg_index_stats` extension you will remove all auto-generated statistics in the database.
