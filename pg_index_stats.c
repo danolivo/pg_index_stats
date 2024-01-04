@@ -21,7 +21,7 @@
 
 PG_MODULE_MAGIC;
 
-PG_FUNCTION_INFO_V1(build_extended_statistic);
+PG_FUNCTION_INFO_V1(pg_index_stats_build);
 
 #define EXTENSION_NAME "pg_index_stats"
 
@@ -52,7 +52,7 @@ static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 
 static List *index_candidates = NIL;
 
-static bool build_extended_statistic_int(Relation rel);
+static bool pg_index_stats_build_int(Relation rel);
 
 static bool _create_statistics(CreateStatsStmt *stmt, Oid indexId)
 {
@@ -87,7 +87,7 @@ static bool _create_statistics(CreateStatsStmt *stmt, Oid indexId)
  * generateClonedExtStatsStmt
  */
 Datum
-build_extended_statistic(PG_FUNCTION_ARGS)
+pg_index_stats_build(PG_FUNCTION_ARGS)
 {
 	text	   *relname = PG_GETARG_TEXT_PP(0);
 	char	   *cmode = text_to_cstring(PG_GETARG_TEXT_PP(1));
@@ -109,7 +109,7 @@ build_extended_statistic(PG_FUNCTION_ARGS)
 				 errmsg("\"%s\" is not an index",
 						RelationGetRelationName(rel))));
 
-	result = build_extended_statistic_int(rel);
+	result = pg_index_stats_build_int(rel);
 	relation_close(rel, AccessShareLock);
 
 	SetConfigOption(EXTENSION_NAME".mode", tmpmode, PGC_SUSET, PGC_S_SESSION);
@@ -121,7 +121,7 @@ build_extended_statistic(PG_FUNCTION_ARGS)
  * expression.
  */
 static bool
-build_extended_statistic_int(Relation rel)
+pg_index_stats_build_int(Relation rel)
 {
 	TupleDesc		tupdesc = NULL;
 	Oid				indexId;
@@ -407,7 +407,7 @@ after_utility_extstat_creation(PlannedStmt *pstmt, const char *queryString,
 				continue;
 			}
 
-			build_extended_statistic_int(rel);
+			pg_index_stats_build_int(rel);
 			index_candidates = foreach_delete_current(index_candidates, lc);
 			relation_close(rel, AccessShareLock);
 	}
