@@ -19,6 +19,10 @@ FROM  pg_statistic_ext s JOIN pg_description d ON (s.oid = d.objoid)
 WHERE description LIKE 'pg_index_stats%';
 ```
 
+## Research
+The main goal of this work is to understand the real benefits of extended statistics. Here we have two directions:
+* Is it possible to make it more compact? Adding new statistics we can have different relationships: duplicated, overlapping, intersecting, including. So, we should try to look into all these cases and find the best solution to optimize storage and ANALYZE time.
+* How to use extended statistics. Do we need additional core tweaks to make it more effective?
 
 # TODO
 * In the case of indexes intersection, combine their **multivariate** statistics into some meta statistics.
