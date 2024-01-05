@@ -15,10 +15,9 @@
  *-------------------------------------------------------------------------
  */
 
-#include "postgres.h"
+#include "pg_index_stats.h"
 
 #include "access/nbtree.h"
-#include "access/relation.h"
 #include "access/xact.h"
 #include "catalog/dependency.h"
 #include "catalog/index.h"
@@ -39,8 +38,6 @@
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pg_index_stats_build);
-
-#define EXTENSION_NAME "pg_index_stats"
 
 typedef enum
 {
@@ -254,6 +251,9 @@ pg_index_stats_build_int(Relation rel)
 
 		if (list_length(stmt->exprs) < 2)
 			/* Extended statistics can be made only for two or more expressions */
+			goto cleanup;
+
+		if (lookup_relation_statistics(heapId, atts_used, stmt->exprs))
 			goto cleanup;
 
 		/* Still only one relation allowed in the core */
