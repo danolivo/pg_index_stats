@@ -23,6 +23,8 @@ WHERE description LIKE 'pg_index_stats%';
 The main goal of this work is to understand the real benefits of extended statistics. Here we have two directions:
 * Is it possible to make it more compact? Adding new statistics we can have different relationships: duplicated, overlapping, intersecting, including. So, we should try to look into all these cases and find the best solution to optimize storage and ANALYZE time.
 * How to use extended statistics. Do we need additional core tweaks to make it more effective?
+* What about histograms on the set of columns? Partially, answer can be found there: https://www.postgresql.org/message-id/flat/CAN_hQmsYDhPMK4bSJHPw3RGnpKqPbx2Uk_7HRV%2BDz9F5H7dj1A%40mail.gmail.com and https://www.postgresql.org/message-id/flat/5460244C.8080109%40fuzzy.cz#4fcda52e1dc956e0631056ef2ab12949
+
 
 # TODO
 * In the case of indexes intersection, combine their **multivariate** statistics into some meta statistics.
