@@ -7,8 +7,9 @@
 
 #define EXTENSION_NAME "pg_index_stats"
 
-extern bool lookup_relation_statistics(Oid heapOid,
-									   Bitmapset *columns,
-									   List *exprs);
+extern List * analyze_relation_statistics(Oid heapOid,
+										  Bitmapset *columns,
+										  List *exprs);
+extern bool is_duplicate_stat(List *statList);
 
 #endif							/* PG_INDEX_STATS_H */

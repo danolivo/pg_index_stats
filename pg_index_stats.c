@@ -253,7 +253,9 @@ pg_index_stats_build_int(Relation rel)
 			/* Extended statistics can be made only for two or more expressions */
 			goto cleanup;
 
-		if (lookup_relation_statistics(heapId, atts_used, stmt->exprs))
+		if (is_duplicate_stat(
+				analyze_relation_statistics(heapId, atts_used, stmt->exprs)))
+			/* Just for now, don't allow duplicates */
 			goto cleanup;
 
 		/* Still only one relation allowed in the core */
