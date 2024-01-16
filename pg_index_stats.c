@@ -179,6 +179,7 @@ pg_index_stats_build_int(Relation rel)
 		int					i;
 		Relation			hrel;
 		Bitmapset		   *atts_used = NULL;
+		List			   *exprlst = NIL;
 
 		heapId = IndexGetRelation(indexId, false);
 		hrel = relation_open(heapId, AccessShareLock);
@@ -201,12 +202,6 @@ pg_index_stats_build_int(Relation rel)
 								pstrdup(RelationGetRelationName(hrel)), -1),
 		relation_close(hrel, AccessShareLock);
 
-		stmt->defnames = NULL;		/* qualified name (list of String) */
-		stmt->exprs = NIL;
-		stmt->stat_types = list_make3(makeString("ndistinct"),
-									  makeString("dependencies"),
-									  makeString("mcv"));
-
 		for (i = 0; i < indexInfo->ii_NumIndexKeyAttrs; i++)
 		{
 			AttrNumber	atnum = indexInfo->ii_IndexAttrNumbers[i];
@@ -214,7 +209,7 @@ pg_index_stats_build_int(Relation rel)
 
 			Assert(extstat_columns_limit > 1);
 
-			if (list_length(stmt->exprs) >= extstat_columns_limit)
+			if (list_length(exprlst) >= extstat_columns_limit)
 			{
 				/*
 				 * To reduce risks of blind usage use only limited number of
@@ -246,15 +241,15 @@ pg_index_stats_build_int(Relation rel)
 				selem->expr = indexkey;
 			}
 
-			stmt->exprs = lappend(stmt->exprs, selem);
+			exprlst = lappend(exprlst, selem);
 		}
 
-		if (list_length(stmt->exprs) < 2)
+		if (list_length(exprlst) < 2)
 			/* Extended statistics can be made only for two or more expressions */
 			goto cleanup;
 
 		if (is_duplicate_stat(
-				analyze_relation_statistics(heapId, atts_used, stmt->exprs)))
+				analyze_relation_statistics(heapId, atts_used, exprlst)))
 			/* Just for now, don't allow duplicates */
 			goto cleanup;
 
@@ -263,6 +258,11 @@ pg_index_stats_build_int(Relation rel)
 		stmt->stxcomment = EXTENSION_NAME" - multivariate statistics";
 		stmt->transformed = false;	/* true when transformStatsStmt is finished */
 		stmt->if_not_exists = true;
+		stmt->defnames = NULL;		/* qualified name (list of String) */
+		stmt->exprs = exprlst;
+		stmt->stat_types = list_make3(makeString("ndistinct"),
+									  makeString("dependencies"),
+									  makeString("mcv"));
 
 		if (extstat_autogen_mode == MODE_ALL ||
 			extstat_autogen_mode == MODE_MULTIVARIATE)
