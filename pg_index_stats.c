@@ -137,6 +137,7 @@ pg_index_stats_build(PG_FUNCTION_ARGS)
 static bool
 pg_index_stats_build_int(Relation rel)
 {
+	Relation		hrel = NULL;
 	TupleDesc		tupdesc = NULL;
 	Oid				indexId;
 	Oid				heapId;
@@ -177,9 +178,9 @@ pg_index_stats_build_int(Relation rel)
 		ListCell		   *indexpr_item = list_head(indexInfo->ii_Expressions);
 		RangeVar		   *from;
 		int					i;
-		Relation			hrel;
 		Bitmapset		   *atts_used = NULL;
 		List			   *exprlst = NIL;
+		List			   *stmtsLst = NIL;
 
 		heapId = IndexGetRelation(indexId, false);
 		hrel = relation_open(heapId, AccessShareLock);
@@ -189,18 +190,16 @@ pg_index_stats_build_int(Relation rel)
 		 * table or materialized VIEW.
 		 */
 		if (hrel->rd_rel->relkind != RELKIND_RELATION)
-		{
 			/*
 			 * Just for sure. TODO: may be better. At least for TOAST relations
 			 */
-			relation_close(hrel, AccessShareLock);
 			goto cleanup;
-		}
 
-		tupdesc = CreateTupleDescCopy(RelationGetDescr(hrel));
+		/* Next step is to build statistics expression list */
+
+		tupdesc = RelationGetDescr(hrel);
 		from = makeRangeVar(get_namespace_name(RelationGetNamespace(hrel)),
-								pstrdup(RelationGetRelationName(hrel)), -1),
-		relation_close(hrel, AccessShareLock);
+								pstrdup(RelationGetRelationName(hrel)), -1);
 
 		for (i = 0; i < indexInfo->ii_NumIndexKeyAttrs; i++)
 		{
@@ -247,6 +246,8 @@ pg_index_stats_build_int(Relation rel)
 		if (list_length(exprlst) < 2)
 			/* Extended statistics can be made only for two or more expressions */
 			goto cleanup;
+
+		stmtsLst = get_all_multivariate_stmts(hrel, atts_used, exprlst);
 
 		if (is_duplicate_stat(
 				analyze_relation_statistics(heapId, atts_used, exprlst)))
@@ -345,11 +346,10 @@ pg_index_stats_build_int(Relation rel)
 	result = true;
 
 cleanup:
-
+	if (hrel)
+		relation_close(hrel, AccessShareLock);
 	if (indexInfo)
 		pfree(indexInfo);
-	if (tupdesc)
-		FreeTupleDesc(tupdesc);
 
 	AtEOXact_GUC(false, save_nestlevel);
 	SetUserIdAndSecContext(save_userid, save_sec_context);

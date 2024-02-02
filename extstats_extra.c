@@ -34,7 +34,7 @@ typedef struct StatExtEntry
 } StatExtEntry;
 
 /* Comparison result of existed and candidate statistics */
-#define CMPTYPE_MATCH		(1) /* Equal definitions */
+#define CMPTYPE_DEFMATCH	(1) /* Equal definitions (need to check stat types) */
 #define CMPTYPE_INCLUDES	(2) /* Definition of the stored covers incoming one */
 #define CMPTYPE_INCLUDED	(3) /* Definition of the stored is covered by definition of incoming one */
 #define CMPTYPE_INTERCEPT	(4) /* Both definitions have some unique elements */
@@ -272,7 +272,7 @@ analyze_relation_statistics(Oid heapOid, Bitmapset *columns, List *exprs)
 			result->cmptype = CMPTYPE_INCLUDES;
 		else if ((result->exprs_missed == NULL && bms_is_empty(result->columns_missed)) &&
 				(result->exprs_extra == NULL && bms_is_empty(result->columns_extra)))
-			result->cmptype = CMPTYPE_MATCH;
+			result->cmptype = CMPTYPE_DEFMATCH;
 		else
 			elog(PANIC, "Help! I've made a coding blunder!");
 		resList = lappend(resList, result);
@@ -292,8 +292,26 @@ is_duplicate_stat(List *statList)
 	{
 		StatAnalyzeResult *stat = (StatAnalyzeResult *) lfirst(lc);
 
-		if (stat->cmptype == CMPTYPE_MATCH)
+		if (stat->cmptype == CMPTYPE_DEFMATCH &&
+			bms_is_empty(stat->stat_extra) && bms_is_empty(stat->stat_missed))
+			/*
+			 * Definition of extended statistics and stat types are totally the
+			 * same.
+			 */
 			return true;
 	}
 	return false;
+}
+
+List *
+get_all_multivariate_stmts(Relation heaprel, Bitmapset *attrs, List *exprlst)
+{
+	List *ext_stats;
+
+	ext_stats = analyze_relation_statistics(RelationGetRelid(heaprel), attrs, exprlst);
+
+	if (is_duplicate_stat(ext_stats))
+		return NIL;
+
+	return NIL;
 }
