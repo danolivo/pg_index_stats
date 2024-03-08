@@ -7,8 +7,6 @@
 
 #define EXTENSION_NAME "pg_index_stats"
 
-extern int extstat_autogen_mode;
-
 extern List * analyze_relation_statistics(Oid heapOid,
 										  Bitmapset *columns,
 										  List *exprs);

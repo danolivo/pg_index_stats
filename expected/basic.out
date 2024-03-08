@@ -77,7 +77,7 @@ DROP EXTENSION pg_index_stats;
 Indexes:
     "abc1" btree (x, (y * y))
 
-CREATE TEMP TABLE abc(x1 integer, x2 text, x3 name, x4 bigint, x5 text);
+CREATE TABLE abc(x1 integer, x2 text, x3 name, x4 bigint, x5 text);
 INSERT INTO abc SELECT x, 'abc' || x, 'def' || -x, x*100, 'constant'
 FROM generate_series(1,1000) AS x;
 -- Check limits
@@ -86,7 +86,7 @@ CREATE INDEX abc_idx ON abc(x2, x4, (x1*x1/x4), x5, x4, x3, x2, x1);
 -- Must generate both multivariate and univariate statistics
 -- Multivariate one should be only on the first five index expressions
 \d abc
-               Table "pg_temp_3.abc"
+                Table "public.abc"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
  x1     | integer |           |          | 
@@ -97,8 +97,8 @@ CREATE INDEX abc_idx ON abc(x2, x4, (x1*x1/x4), x5, x4, x3, x2, x1);
 Indexes:
     "abc_idx" btree (x2, x4, (x1 * x1 / x4), x5, x4, x3, x2, x1)
 Statistics objects:
-    "pg_temp_3.abc_expr_stat" ON (ROW(x2, x4, x1 * x1 / x4, x5, x3, x1)) FROM abc
-    "pg_temp_3.abc_x2_x4_expr_x5_x3_stat" ON x2, x3, x4, x5, (x1 * x1 / x4) FROM abc
+    "public.abc_expr_stat" ON (ROW(x2, x4, x1 * x1 / x4, x5, x3, x1)) FROM abc
+    "public.abc_x2_x4_expr_x5_x3_stat" ON x2, x3, x4, x5, (x1 * x1 / x4) FROM abc
 
 CREATE EXTENSION pg_index_stats;
 SET pg_index_stats.columns_limit = 8;
@@ -111,7 +111,7 @@ SELECT pg_index_stats_build('abc_idx');
  -- Must see one more statistic because of new limit (including x1)
  -- Don't need new univariate statistics because we already have generated it
 \d abc
-               Table "pg_temp_3.abc"
+                Table "public.abc"
  Column |  Type   | Collation | Nullable | Default 
 --------+---------+-----------+----------+---------
  x1     | integer |           |          | 
@@ -122,9 +122,9 @@ SELECT pg_index_stats_build('abc_idx');
 Indexes:
     "abc_idx" btree (x2, x4, (x1 * x1 / x4), x5, x4, x3, x2, x1)
 Statistics objects:
-    "pg_temp_3.abc_expr_stat" ON (ROW(x2, x4, x1 * x1 / x4, x5, x3, x1)) FROM abc
-    "pg_temp_3.abc_x2_x4_expr_x5_x3_stat" ON x2, x3, x4, x5, (x1 * x1 / x4) FROM abc
-    "pg_temp_3.abc_x2_x4_expr_x5_x3_x1_stat" ON x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc
+    "public.abc_expr_stat" ON (ROW(x2, x4, x1 * x1 / x4, x5, x3, x1)) FROM abc
+    "public.abc_x2_x4_expr_x5_x3_stat" ON x2, x3, x4, x5, (x1 * x1 / x4) FROM abc
+    "public.abc_x2_x4_expr_x5_x3_x1_stat" ON x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc
 
 DROP TABLE abc, test CASCADE;
 DROP EXTENSION pg_index_stats;

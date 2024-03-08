@@ -17,7 +17,7 @@ DROP INDEX abc2;
 DROP EXTENSION pg_index_stats;
 \d test
 
-CREATE TEMP TABLE abc(x1 integer, x2 text, x3 name, x4 bigint, x5 text);
+CREATE TABLE abc(x1 integer, x2 text, x3 name, x4 bigint, x5 text);
 INSERT INTO abc SELECT x, 'abc' || x, 'def' || -x, x*100, 'constant'
 FROM generate_series(1,1000) AS x;
 
