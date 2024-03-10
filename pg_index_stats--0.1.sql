@@ -25,10 +25,16 @@ WITH deleted AS (
       JOIN pg_class c ON (d.refobjid = c.oid)
 	    JOIN pg_namespace n ON (c.relnamespace = n.oid)
     WHERE
-      c.relkind = 'i' AND
+      c.relkind = 'i' AND -- XXX: Should be rewritten if statistics will be allowed over indexes
       n.nspname NOT IN ('pg_catalog', 'pg_toast', 'information_schema')
     )
-  RETURNING *
+  RETURNING s.oid
+),
+delobjs AS (
+  DELETE FROM pg_description USING deleted WHERE objoid = deleted.oid RETURNING *
+),
+deldeps AS (
+  DELETE FROM pg_depend USING deleted WHERE objid = deleted.oid RETURNING *
 ) SELECT count(*) FROM deleted;
 $$ LANGUAGE SQL PARALLEL SAFE STRICT;
 

@@ -110,21 +110,43 @@ SELECT pg_index_stats_build('abc_idx');
 
  -- Must see one more statistic because of new limit (including x1)
  -- Don't need new univariate statistics because we already have generated it
-\d abc
-                Table "public.abc"
- Column |  Type   | Collation | Nullable | Default 
---------+---------+-----------+----------+---------
- x1     | integer |           |          | 
- x2     | text    |           |          | 
- x3     | name    |           |          | 
- x4     | bigint  |           |          | 
- x5     | text    |           |          | 
-Indexes:
-    "abc_idx" btree (x2, x4, (x1 * x1 / x4), x5, x4, x3, x2, x1)
-Statistics objects:
-    "public.abc_expr_stat" ON (ROW(x2, x4, x1 * x1 / x4, x5, x3, x1)) FROM abc
-    "public.abc_x2_x4_expr_x5_x3_stat" ON x2, x3, x4, x5, (x1 * x1 / x4) FROM abc
-    "public.abc_x2_x4_expr_x5_x3_x1_stat" ON x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc
+\dX
+                                                  List of extended statistics
+ Schema |             Name             |                    Definition                    | Ndistinct | Dependencies |   MCV   
+--------+------------------------------+--------------------------------------------------+-----------+--------------+---------
+ public | abc_expr_stat                | (ROW(x2, x4, x1 * x1 / x4, x5, x3, x1)) FROM abc |           |              | 
+ public | abc_x2_x4_expr_x5_x3_stat    | x2, x3, x4, x5, (x1 * x1 / x4) FROM abc          | defined   | defined      | defined
+ public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc      | defined   | defined      | defined
+(3 rows)
+
+SELECT count(*) FROM pg_description
+WHERE description LIKE 'pg_index_stats%';
+ count 
+-------
+     3
+(1 row)
+
+-- Check removing only auto-generated statistics.
+CREATE STATISTICS manually_built ON x1,x3,(x2||'2.') FROM abc;
+SELECT * FROM pg_index_stats_remove();
+ pg_index_stats_remove 
+-----------------------
+                     3
+(1 row)
+
+\dX
+                                    List of extended statistics
+ Schema |      Name      |             Definition              | Ndistinct | Dependencies |   MCV   
+--------+----------------+-------------------------------------+-----------+--------------+---------
+ public | manually_built | x1, x3, (x2 || '2.'::text) FROM abc | defined   | defined      | defined
+(1 row)
+
+SELECT count(*) FROM pg_description
+WHERE description LIKE 'pg_index_stats%';
+ count 
+-------
+     0
+(1 row)
 
 DROP TABLE abc, test CASCADE;
 DROP EXTENSION pg_index_stats;

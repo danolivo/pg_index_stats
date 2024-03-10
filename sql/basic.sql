@@ -32,7 +32,16 @@ SET pg_index_stats.columns_limit = 8;
 SELECT pg_index_stats_build('abc_idx');
  -- Must see one more statistic because of new limit (including x1)
  -- Don't need new univariate statistics because we already have generated it
-\d abc
+\dX
+SELECT count(*) FROM pg_description
+WHERE description LIKE 'pg_index_stats%';
+
+-- Check removing only auto-generated statistics.
+CREATE STATISTICS manually_built ON x1,x3,(x2||'2.') FROM abc;
+SELECT * FROM pg_index_stats_remove();
+\dX
+SELECT count(*) FROM pg_description
+WHERE description LIKE 'pg_index_stats%';
 
 DROP TABLE abc, test CASCADE;
 DROP EXTENSION pg_index_stats;
