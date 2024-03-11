@@ -43,5 +43,11 @@ SELECT * FROM pg_index_stats_remove();
 SELECT count(*) FROM pg_description
 WHERE description LIKE 'pg_index_stats%';
 
+-- Test for duplicated statistics. We must create extstat on the same list of
+-- expressions but with MCV excluded.
+CREATE STATISTICS manually_built_1 (mcv) ON x2, x4, (x1*x1/x4), x5, x3, x1 FROM abc;
+SELECT pg_index_stats_build('abc_idx');
+\dX
+
 DROP TABLE abc, test CASCADE;
 DROP EXTENSION pg_index_stats;

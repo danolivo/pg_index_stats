@@ -148,5 +148,23 @@ WHERE description LIKE 'pg_index_stats%';
      0
 (1 row)
 
+-- Test for duplicated statistics. We must create extstat on the same list of
+-- expressions but with MCV excluded.
+CREATE STATISTICS manually_built_1 (mcv) ON x2, x4, (x1*x1/x4), x5, x3, x1 FROM abc;
+SELECT pg_index_stats_build('abc_idx');
+ pg_index_stats_build 
+----------------------
+ t
+(1 row)
+
+\dX
+                                               List of extended statistics
+ Schema |             Name             |                 Definition                  | Ndistinct | Dependencies |   MCV   
+--------+------------------------------+---------------------------------------------+-----------+--------------+---------
+ public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   | defined      | 
+ public | manually_built               | x1, x3, (x2 || '2.'::text) FROM abc         | defined   | defined      | defined
+ public | manually_built_1             | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc |           |              | defined
+(3 rows)
+
 DROP TABLE abc, test CASCADE;
 DROP EXTENSION pg_index_stats;

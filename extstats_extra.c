@@ -59,7 +59,6 @@ typedef struct StatAnalyzeResult
 
 	Bitmapset	   *stat_matched;
 	Bitmapset	   *stat_missed;
-	Bitmapset	   *stat_extra;
 
 	StatExtEntry   *ref;
 } StatAnalyzeResult;
@@ -177,6 +176,13 @@ fetch_statentries_for_relation(Relation pg_statext, Oid relid)
 	return result;
 }
 
+/*
+ * Pass through all extended statistics on the table.
+ * Analyse intersection between candidate statistics and existed one.
+ * Return list containing result of the analysis and links to specific entries.
+ * Feel free to implement additional routines to make decisions on new
+ * statistics and their fulfillment.
+ */
 List * /* of StatAnalyzeResult */
 analyze_relation_statistics(Oid heapOid, Bitmapset *columns, List *exprs)
 {
@@ -202,14 +208,19 @@ analyze_relation_statistics(Oid heapOid, Bitmapset *columns, List *exprs)
 		/* Zeroing the struct on allocation to avoid annoying initializations */
 		result = palloc0(sizeof(StatAnalyzeResult));
 
-		/* Skip custom statistics has made by an user manually */
+		/* Save link to statistics entry */
+		result->ref = entry;
+
+		/* Mark custom statistics has made by an user manually */
 		stxcomment = GetComment(entry->statOid, StatisticExtRelationId, 0);
 		if (stxcomment != NULL &&
 			strstr(stxcomment, EXTENSION_NAME" - ") != NULL)
 			result->auto_generated = true;
 
-		/* Compare columns of already existed and candidate
-		 * (induced by index creation) statistics */
+		/*
+		 * Compare columns of already existed and candidate
+		 * (induced by index creation) statistics
+		 */
 		result->columns_matched = bms_intersect(columns, entry->columns);
 		result->columns_missed = bms_difference(columns, entry->columns);
 		result->columns_extra = bms_difference(entry->columns, columns);
@@ -232,9 +243,16 @@ analyze_relation_statistics(Oid heapOid, Bitmapset *columns, List *exprs)
 			ListCell   *lc2;
 			bool		found = false;
 
+			if (expr1 == NULL)
+				/* It is a column, not an expression */
+				continue;
+
 			foreach (lc2, tmp_exprs)
 			{
 				expr2 = (Node *) lfirst(lc2);
+
+				/* Don't wait NULL expression for stored statistics */
+				Assert(expr2 != NULL);
 
 				if (!equal(expr1, expr2))
 					continue;
@@ -255,6 +273,10 @@ analyze_relation_statistics(Oid heapOid, Bitmapset *columns, List *exprs)
 				result->exprs_missed = lappend(result->exprs_missed, expr1);
 		}
 
+		/*
+		 * Expressions, which weren't matched survive and should be stored as
+		 * 'extra' expressions.
+		 */
 		result->exprs_extra = tmp_exprs;
 
 		/* Now we can define relation between both statistics definitions */
@@ -277,41 +299,54 @@ analyze_relation_statistics(Oid heapOid, Bitmapset *columns, List *exprs)
 			elog(PANIC, "Help! I've made a coding blunder!");
 		resList = lappend(resList, result);
 
-		/* TODO: Identify types of statistics */
+		/* Identify types of statistics in the entry */
+
+		result->stat_missed = bms_add_member(result->stat_missed, (int) STATS_EXT_NDISTINCT);
+		result->stat_missed = bms_add_member(result->stat_missed, (int) STATS_EXT_DEPENDENCIES);
+		result->stat_missed = bms_add_member(result->stat_missed, (int) STATS_EXT_MCV);
+		result->stat_missed = bms_add_member(result->stat_missed, (int) STATS_EXT_EXPRESSIONS);
+
+		foreach(lc1, entry->types)
+		{
+			char		t = (char) lfirst_int(lc1);
+
+			Assert(bms_is_member((int) t, result->stat_missed));
+
+			if (t == STATS_EXT_EXPRESSIONS)
+				/* TODO: elaborate logic by taking into account expression stats */
+				continue;
+
+			result->stat_matched = bms_add_member(result->stat_matched, (int) t);
+		}
+		result->stat_missed = bms_del_members(result->stat_missed, result->stat_matched);
+		result->stat_missed = bms_del_member(result->stat_missed, (int) STATS_EXT_EXPRESSIONS);
 	}
 
+	list_free(statslist);
 	return resList;
 }
 
-bool
-is_duplicate_stat(List *statList)
+Bitmapset *
+check_duplicated(List *statList)
 {
 	ListCell *lc;
+	Bitmapset *missed = NULL;
+
+	missed = bms_add_member(missed, (int) STATS_EXT_NDISTINCT);
+	missed = bms_add_member(missed, (int) STATS_EXT_DEPENDENCIES);
+	missed = bms_add_member(missed, (int) STATS_EXT_MCV);
 
 	foreach (lc, statList)
 	{
 		StatAnalyzeResult *stat = (StatAnalyzeResult *) lfirst(lc);
 
-		if (stat->cmptype == CMPTYPE_DEFMATCH &&
-			bms_is_empty(stat->stat_extra) && bms_is_empty(stat->stat_missed))
+		if (stat->cmptype == CMPTYPE_DEFMATCH)
 			/*
-			 * Definition of extended statistics and stat types are totally the
-			 * same.
+			 * Stat stored contains the same definition. Exclude from the newly
+			 * created statistics already existed fields.
 			 */
-			return true;
+			missed = bms_del_members(missed, stat->stat_matched);
 	}
-	return false;
-}
 
-List *
-get_all_multivariate_stmts(Relation heaprel, Bitmapset *attrs, List *exprlst)
-{
-	List *ext_stats;
-
-	ext_stats = analyze_relation_statistics(RelationGetRelid(heaprel), attrs, exprlst);
-
-	if (is_duplicate_stat(ext_stats))
-		return NIL;
-
-	return NIL;
+	return missed;
 }

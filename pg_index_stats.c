@@ -24,6 +24,7 @@
 #include "catalog/namespace.h"
 #include "catalog/objectaccess.h"
 #include "catalog/pg_extension.h"
+#include "catalog/pg_statistic_ext.h"
 #include "commands/defrem.h"
 #include "commands/extension.h"
 #include "miscadmin.h"
@@ -180,7 +181,8 @@ pg_index_stats_build_int(Relation rel)
 		int					i;
 		Bitmapset		   *atts_used = NULL;
 		List			   *exprlst = NIL;
-		List			   *stmtsLst = NIL;
+		List			   *analyseList;
+		Bitmapset		   *stat_types = NULL;
 
 		heapId = IndexGetRelation(indexId, false);
 		hrel = relation_open(heapId, AccessShareLock);
@@ -247,10 +249,8 @@ pg_index_stats_build_int(Relation rel)
 			/* Extended statistics can be made only for two or more expressions */
 			goto cleanup;
 
-		stmtsLst = get_all_multivariate_stmts(hrel, atts_used, exprlst);
-
-		if (is_duplicate_stat(
-				analyze_relation_statistics(heapId, atts_used, exprlst)))
+		analyseList = analyze_relation_statistics(heapId, atts_used, exprlst);
+		if (bms_is_empty((stat_types = check_duplicated(analyseList))))
 			/* Just for now, don't allow duplicates */
 			goto cleanup;
 
@@ -261,9 +261,14 @@ pg_index_stats_build_int(Relation rel)
 		stmt->if_not_exists = true;
 		stmt->defnames = NULL;		/* qualified name (list of String) */
 		stmt->exprs = exprlst;
-		stmt->stat_types = list_make3(makeString("ndistinct"),
-									  makeString("dependencies"),
-									  makeString("mcv"));
+
+		if (bms_is_member((int) STATS_EXT_NDISTINCT, stat_types))
+			stmt->stat_types = lappend(stmt->stat_types, makeString("ndistinct"));
+		if (bms_is_member((int) STATS_EXT_DEPENDENCIES, stat_types))
+			stmt->stat_types = lappend(stmt->stat_types, makeString("dependencies"));
+		if (bms_is_member((int) STATS_EXT_MCV, stat_types))
+			stmt->stat_types = lappend(stmt->stat_types, makeString("mcv"));
+		Assert(stmt->stat_types != NIL);
 
 		if (extstat_autogen_mode == MODE_ALL ||
 			extstat_autogen_mode == MODE_MULTIVARIATE)
