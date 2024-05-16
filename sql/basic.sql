@@ -24,7 +24,7 @@ FROM generate_series(1,1000) AS x;
 -- Check limits
 SET pg_index_stats.mode = 'all';
 CREATE INDEX abc_idx ON abc(x2, x4, (x1*x1/x4), x5, x4, x3, x2, x1);
--- Must generate both multivariate and univariate statistics
+-- Must generate all multivariate statistics
 -- Multivariate one should be only on the first five index expressions
 \d abc
 CREATE EXTENSION pg_index_stats;

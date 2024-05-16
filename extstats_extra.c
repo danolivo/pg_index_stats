@@ -214,7 +214,7 @@ analyze_relation_statistics(Oid heapOid, Bitmapset *columns, List *exprs)
 		/* Mark custom statistics has made by an user manually */
 		stxcomment = GetComment(entry->statOid, StatisticExtRelationId, 0);
 		if (stxcomment != NULL &&
-			strstr(stxcomment, EXTENSION_NAME" - ") != NULL)
+			strstr(stxcomment, MODULE_NAME" - ") != NULL)
 			result->auto_generated = true;
 
 		/*

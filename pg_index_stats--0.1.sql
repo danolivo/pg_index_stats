@@ -8,7 +8,7 @@
 -- expression
 --
 CREATE FUNCTION pg_index_stats_build(idxname text,
-									 mode text DEFAULT 'multivariate')
+									 mode text DEFAULT 'ndistinct')
 RETURNS boolean
 AS 'MODULE_PATHNAME', 'pg_index_stats_build'
 LANGUAGE C VOLATILE STRICT;

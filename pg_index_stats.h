@@ -5,7 +5,7 @@
 
 #include "access/relation.h"
 
-#define EXTENSION_NAME "pg_index_stats"
+#define MODULE_NAME "pg_index_stats"
 
 extern List * analyze_relation_statistics(Oid heapOid,
 										  Bitmapset *columns,
