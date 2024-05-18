@@ -1,5 +1,5 @@
 CREATE EXTENSION pg_index_stats;
-SET pg_index_stats.mode = 'disabled';
+SET pg_index_stats.stattypes = '';
 CREATE TABLE test(x int, y numeric);
 CREATE INDEX abc1 ON test(x,(y*y));
 CREATE INDEX abc2 ON test(x,y);
@@ -81,10 +81,12 @@ CREATE TABLE abc(x1 integer, x2 text, x3 name, x4 bigint, x5 text);
 INSERT INTO abc SELECT x, 'abc' || x, 'def' || -x, x*100, 'constant'
 FROM generate_series(1,1000) AS x;
 -- Check limits
-SET pg_index_stats.mode = 'all';
+SET pg_index_stats.stattypes = 'all';
+SET pg_index_stats.columns_limit = 5;
 CREATE INDEX abc_idx ON abc(x2, x4, (x1*x1/x4), x5, x4, x3, x2, x1);
--- Must generate all multivariate statistics
--- Multivariate one should be only on the first five index expressions
+-- Must generate all multivariate statistics without preliminary execution of
+-- CREATE EXTENSION statement - it just provides some service routines.
+-- Must be only on the first five index expressions
 \d abc
                 Table "public.abc"
  Column |  Type   | Collation | Nullable | Default 
@@ -97,30 +99,30 @@ CREATE INDEX abc_idx ON abc(x2, x4, (x1*x1/x4), x5, x4, x3, x2, x1);
 Indexes:
     "abc_idx" btree (x2, x4, (x1 * x1 / x4), x5, x4, x3, x2, x1)
 Statistics objects:
-    "public.abc_x2_x4_expr_x5_x3_x1_stat" ON x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc
+    "public.abc_x2_x4_expr_x5_x3_stat" ON x2, x3, x4, x5, (x1 * x1 / x4) FROM abc
 
 CREATE EXTENSION pg_index_stats;
 SET pg_index_stats.columns_limit = 8;
 SELECT pg_index_stats_build('abc_idx');
  pg_index_stats_build 
 ----------------------
- f
+ t
 (1 row)
 
- -- Must see one more statistic because of new limit (including x1)
- -- Don't need new univariate statistics because we already have generated it
+-- Must see one more statistic because of new limit (including x1)
 \dX
                                                List of extended statistics
  Schema |             Name             |                 Definition                  | Ndistinct | Dependencies |   MCV   
 --------+------------------------------+---------------------------------------------+-----------+--------------+---------
+ public | abc_x2_x4_expr_x5_x3_stat    | x2, x3, x4, x5, (x1 * x1 / x4) FROM abc     | defined   | defined      | defined
  public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   | defined      | defined
-(1 row)
+(2 rows)
 
 SELECT count(*) FROM pg_description
 WHERE description LIKE 'pg_index_stats%';
  count 
 -------
-     1
+     2
 (1 row)
 
 -- Check removing only auto-generated statistics.
@@ -128,7 +130,7 @@ CREATE STATISTICS manually_built ON x1,x3,(x2||'2.') FROM abc;
 SELECT * FROM pg_index_stats_remove();
  pg_index_stats_remove 
 -----------------------
-                     1
+                     2
 (1 row)
 
 \dX
@@ -158,7 +160,7 @@ SELECT pg_index_stats_build('abc_idx');
                                                List of extended statistics
  Schema |             Name             |                 Definition                  | Ndistinct | Dependencies |   MCV   
 --------+------------------------------+---------------------------------------------+-----------+--------------+---------
- public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   | defined      | 
+ public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   | defined      | defined
  public | manually_built               | x1, x3, (x2 || '2.'::text) FROM abc         | defined   | defined      | defined
  public | manually_built_1             | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc |           |              | defined
 (3 rows)
