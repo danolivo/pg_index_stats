@@ -40,22 +40,12 @@ PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pg_index_stats_build);
 
-typedef enum
-{
-	MODE_DISABLED,
-	MODE_NDISTINCT,
-	MODE_ALL,
-}	pg_index_stats_mode;
+#define STAT_NDISTINCT		(1<<0)
+#define STAT_MCV			(1<<1)
+#define STAT_DEPENDENCIES	(1<<2)
 
-/* GUC variables */
-static const struct config_enum_entry format_options[] = {
-	{"disabled", MODE_DISABLED, false},
-	{"ndistinct", MODE_NDISTINCT, false},
-	{"all", MODE_ALL, false},
-	{NULL, 0, false}
-};
-
-static int extstat_autogen_mode = MODE_NDISTINCT; /* economical mode by default */
+static char *stattypes = "distinct";
+static int32 statistic_types = -1;
 static int extstat_columns_limit = 7; /* Don't allow to be too expensive */
 
 void _PG_init(void);
@@ -67,7 +57,54 @@ static List *index_candidates = NIL;
 
 static bool pg_index_stats_build_int(Relation rel);
 
-static bool _create_statistics(CreateStatsStmt *stmt, Oid indexId)
+static int32
+get_statistic_types()
+{
+	List	   *elemlist;
+	ListCell   *lc;
+
+	if (statistic_types != -1)
+		return statistic_types;
+
+	if (!SplitDirectoriesString(stattypes, ',', &elemlist))
+	{
+		/* syntax error in list */
+		ereport(FATAL,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid list syntax in parameter \"%s\"",
+						"statistic_types")));
+	}
+
+	if (elemlist == NIL)
+	{
+		statistic_types = 0;
+		return statistic_types;
+	}
+
+	foreach(lc, elemlist)
+	{
+		char   *stattype = (char *) lfirst(lc);
+
+		if (strcmp(stattype, "distinct") == 0)
+			statistic_types |= STAT_NDISTINCT;
+		else if (strcmp(stattype, "mcv") == 0)
+			statistic_types |= STAT_MCV;
+		else if (strcmp(stattype, "deps") == 0)
+			statistic_types |= STAT_DEPENDENCIES;
+		else if (strcmp(stattype, "all") == 0)
+			statistic_types = STAT_NDISTINCT | STAT_MCV | STAT_DEPENDENCIES;
+		else
+			ereport(FATAL,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("Invalid parameter \"%s\" in GUC \"%s\"",
+						stattype, "statistic_types")));
+	}
+
+	return statistic_types;
+}
+
+static
+bool _create_statistics(CreateStatsStmt *stmt, Oid indexId)
 {
 	ObjectAddress	obj;
 	ObjectAddress	refobj;
@@ -105,12 +142,12 @@ pg_index_stats_build(PG_FUNCTION_ARGS)
 {
 	text	   *relname = PG_GETARG_TEXT_PP(0);
 	char	   *cmode = text_to_cstring(PG_GETARG_TEXT_PP(1));
-	const char *tmpmode = GetConfigOption(MODULE_NAME".mode", false, true);
+	const char *tmpmode = GetConfigOption(MODULE_NAME".stattypes", false, true);
 	RangeVar   *relvar;
 	Relation	rel;
 	bool		result;
 
-	SetConfigOption(MODULE_NAME".mode", cmode, PGC_SUSET, PGC_S_SESSION);
+	SetConfigOption(MODULE_NAME".stattypes", cmode, PGC_SUSET, PGC_S_SESSION);
 
 	/* Get descriptor of incoming index relation */
 	relvar = makeRangeVarFromNameList(textToQualifiedNameList(relname));
@@ -126,7 +163,7 @@ pg_index_stats_build(PG_FUNCTION_ARGS)
 	result = pg_index_stats_build_int(rel);
 	relation_close(rel, AccessShareLock);
 
-	SetConfigOption(MODULE_NAME".mode", tmpmode, PGC_SUSET, PGC_S_SESSION);
+	SetConfigOption(MODULE_NAME".stattypes", tmpmode, PGC_SUSET, PGC_S_SESSION);
 	PG_RETURN_BOOL(result);
 }
 
@@ -146,6 +183,10 @@ pg_index_stats_build_int(Relation rel)
 	int				save_sec_context;
 	int				save_nestlevel;
 	bool			result = false;
+	int32			stat_types = 0;
+
+	if ((stat_types = get_statistic_types()) == 0)
+		return false;
 
 	/*
 	 * Switch to the table owner's userid, so that any index functions are
@@ -181,7 +222,6 @@ pg_index_stats_build_int(Relation rel)
 		Bitmapset		   *atts_used = NULL;
 		List			   *exprlst = NIL;
 		List			   *analyseList;
-		Bitmapset		   *stat_types = NULL;
 
 		heapId = IndexGetRelation(indexId, false);
 		hrel = relation_open(heapId, AccessShareLock);
@@ -249,7 +289,7 @@ pg_index_stats_build_int(Relation rel)
 			goto cleanup;
 
 		analyseList = analyze_relation_statistics(heapId, atts_used, exprlst);
-		if (bms_is_empty((stat_types = check_duplicated(analyseList))))
+		if (bms_is_empty(check_duplicated(analyseList)))
 			/* Just for now, don't allow duplicates */
 			goto cleanup;
 
@@ -261,11 +301,11 @@ pg_index_stats_build_int(Relation rel)
 		stmt->defnames = NULL;		/* qualified name (list of String) */
 		stmt->exprs = exprlst;
 
-		if (bms_is_member((int) STATS_EXT_NDISTINCT, stat_types))
+		if (stat_types & STAT_NDISTINCT)
 			stmt->stat_types = lappend(stmt->stat_types, makeString("ndistinct"));
-		if (bms_is_member((int) STATS_EXT_DEPENDENCIES, stat_types))
+		if (stat_types & STAT_DEPENDENCIES)
 			stmt->stat_types = lappend(stmt->stat_types, makeString("dependencies"));
-		if (bms_is_member((int) STATS_EXT_MCV, stat_types))
+		if (stat_types & STAT_MCV)
 			stmt->stat_types = lappend(stmt->stat_types, makeString("mcv"));
 		Assert(stmt->stat_types != NIL);
 
@@ -307,7 +347,7 @@ extstat_remember_index_hook(ObjectAccessType access, Oid classId,
 	if (next_object_access_hook)
 		(*next_object_access_hook) (access, classId, objectId, subId, arg);
 
-	if (extstat_autogen_mode == MODE_DISABLED || !IsNormalProcessingMode() ||
+	if (get_statistic_types() == 0 || !IsNormalProcessingMode() ||
 		access != OAT_POST_CREATE || classId != RelationRelationId)
 		return;
 
@@ -379,20 +419,23 @@ after_utility_extstat_creation(PlannedStmt *pstmt, const char *queryString,
 	PG_END_TRY();
 }
 
+static void
+assign_hook_stattypes(const char *newval, void *extra)
+{
+	statistic_types = -1;
+}
+
 void
 _PG_init(void)
 {
-	DefineCustomEnumVariable(MODULE_NAME".mode",
-							 "Mode of extended statistics creation on new index.",
-							 NULL,
-							 &extstat_autogen_mode,
-							 MODE_NDISTINCT,
-							 format_options,
-							 PGC_SUSET,
-							 0,
-							 NULL,
-							 NULL,
-							 NULL);
+	DefineCustomStringVariable(MODULE_NAME".stattypes",
+							   "Types of statistics to be automatically created",
+							   NULL,
+							   &stattypes,
+							   "distinct",
+							   PGC_SUSET,
+							   0,
+							   NULL, assign_hook_stattypes, NULL);
 
 	DefineCustomIntVariable(MODULE_NAME".columns_limit",
 							"Sets the maximum number of columns involved in multivariate statistics",

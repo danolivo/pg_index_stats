@@ -1,5 +1,5 @@
 CREATE EXTENSION pg_index_stats;
-SET pg_index_stats.mode = 'disabled';
+SET pg_index_stats.stattypes = '';
 
 CREATE TABLE test(x int, y numeric);
 CREATE INDEX abc1 ON test(x,(y*y));
@@ -22,16 +22,17 @@ INSERT INTO abc SELECT x, 'abc' || x, 'def' || -x, x*100, 'constant'
 FROM generate_series(1,1000) AS x;
 
 -- Check limits
-SET pg_index_stats.mode = 'all';
+SET pg_index_stats.stattypes = 'all';
+SET pg_index_stats.columns_limit = 5;
 CREATE INDEX abc_idx ON abc(x2, x4, (x1*x1/x4), x5, x4, x3, x2, x1);
--- Must generate all multivariate statistics
--- Multivariate one should be only on the first five index expressions
+-- Must generate all multivariate statistics without preliminary execution of
+-- CREATE EXTENSION statement - it just provides some service routines.
+-- Must be only on the first five index expressions
 \d abc
 CREATE EXTENSION pg_index_stats;
 SET pg_index_stats.columns_limit = 8;
 SELECT pg_index_stats_build('abc_idx');
- -- Must see one more statistic because of new limit (including x1)
- -- Don't need new univariate statistics because we already have generated it
+-- Must see one more statistic because of new limit (including x1)
 \dX
 SELECT count(*) FROM pg_description
 WHERE description LIKE 'pg_index_stats%';
