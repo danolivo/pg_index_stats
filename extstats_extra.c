@@ -18,9 +18,19 @@
 #include "pg_index_stats.h"
 
 #include "access/genam.h"
+#include "access/htup_details.h"
 #include "access/table.h"
 #include "catalog/pg_statistic_ext.h"
+#include "catalog/pg_type.h"
+#include "commands/comment.h"
+#include "nodes/nodeFuncs.h"
+#include "optimizer/optimizer.h"
+#include "utils/array.h"
+#include "utils/builtins.h"
+#include "utils/fmgroids.h"
+#include "utils/lsyscache.h"
 #include "utils/rel.h"
+#include "utils/syscache.h"
 
 typedef struct StatExtEntry
 {
@@ -29,7 +39,6 @@ typedef struct StatExtEntry
 	char	   *name;			/* statistics object's name */
 	Bitmapset  *columns;		/* attribute numbers covered by the object */
 	List	   *types;			/* 'char' list of enabled statistics kinds */
-	int			stattarget;		/* statistics target (-1 for default) */
 	List	   *exprs;			/* expressions */
 } StatExtEntry;
 
@@ -62,17 +71,6 @@ typedef struct StatAnalyzeResult
 
 	StatExtEntry   *ref;
 } StatAnalyzeResult;
-
-#include "access/htup_details.h"
-#include "catalog/pg_type.h"
-#include "commands/comment.h"
-#include "nodes/nodeFuncs.h"
-#include "optimizer/optimizer.h"
-#include "utils/array.h"
-#include "utils/builtins.h"
-#include "utils/fmgroids.h"
-#include "utils/lsyscache.h"
-#include "utils/syscache.h"
 
 /*
  * Extract auto-generated statistics
@@ -114,7 +112,6 @@ fetch_statentries_for_relation(Relation pg_statext, Oid relid)
 
 		entry->schema = get_namespace_name(staForm->stxnamespace);
 		entry->name = pstrdup(NameStr(staForm->stxname));
-		entry->stattarget = staForm->stxstattarget;
 		for (i = 0; i < staForm->stxkeys.dim1; i++)
 		{
 			entry->columns = bms_add_member(entry->columns,

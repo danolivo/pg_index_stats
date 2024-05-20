@@ -6,7 +6,7 @@ OBJS = \
 	pg_index_stats.o extstats_extra.o
 PGFILEDESC = "pg_index_stats - create extended statistics"
 
-REGRESS = basic
+REGRESS = basic module
 EXTENSION = pg_index_stats
 DATA = pg_index_stats--0.1.sql
 
