@@ -30,4 +30,12 @@ ANALYZE is_test;
 SELECT check_estimated_rows('
   SELECT * FROM is_test WHERE x1=9 AND x2=9 AND x3=9 AND x4=9');
 
+CREATE INDEX ist_idx on is_test (x1,x2,x3,x4);
+ANALYZE;
+\dX
+SELECT count(*) FROM pg_description
+WHERE description LIKE 'pg_index_stats%';
+SELECT check_estimated_rows('
+  SELECT * FROM is_test WHERE x1=9 AND x2=9 AND x3=9 AND x4=9');
+
 DROP TABLE is_test CASCADE;
