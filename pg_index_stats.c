@@ -40,7 +40,7 @@ PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pg_index_stats_build);
 
-static char *stattypes = "distinct";
+static char *stattypes = "mcv, distinct";
 static int32 statistic_types = -1;
 static int extstat_columns_limit = 7; /* Don't allow to be too expensive */
 
@@ -426,7 +426,7 @@ _PG_init(void)
 							   "Types of statistics to be automatically created",
 							   NULL,
 							   &stattypes,
-							   "distinct",
+							   "mcv, distinct",
 							   PGC_SUSET,
 							   0,
 							   NULL, assign_hook_stattypes, NULL);
