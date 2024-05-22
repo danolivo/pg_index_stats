@@ -19,6 +19,9 @@ begin
 end;
 $$;
 
+-- Do not use extension. Utilise library only.
+LOAD 'pg_index_stats';
+
 -- test the extension working as a module only, without UI at all.
 CREATE TABLE is_test(x1 integer, x2 integer, x3 integer, x4 integer);
 
@@ -30,11 +33,13 @@ ANALYZE is_test;
 SELECT check_estimated_rows('
   SELECT * FROM is_test WHERE x1=9 AND x2=9 AND x3=9 AND x4=9');
 
+SET pg_index_stats.stattypes = 'ndistinct, deps';
 CREATE INDEX ist_idx on is_test (x1,x2,x3,x4);
 ANALYZE;
 \dX
-SELECT count(*) FROM pg_description
+SELECT description FROM pg_description
 WHERE description LIKE 'pg_index_stats%';
+-- ndistinct statistics should give good estimation alone, shouldn't it?
 SELECT check_estimated_rows('
   SELECT * FROM is_test WHERE x1=9 AND x2=9 AND x3=9 AND x4=9');
 

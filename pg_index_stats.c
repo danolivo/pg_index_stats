@@ -75,11 +75,9 @@ get_statistic_types()
 						"statistic_types")));
 	}
 
+	statistic_types = 0;
 	if (elemlist == NIL)
-	{
-		statistic_types = 0;
 		return statistic_types;
-	}
 
 	foreach(lc, elemlist)
 	{
