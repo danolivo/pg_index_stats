@@ -40,10 +40,6 @@ PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pg_index_stats_build);
 
-#define STAT_NDISTINCT		(1<<0)
-#define STAT_MCV			(1<<1)
-#define STAT_DEPENDENCIES	(1<<2)
-
 static char *stattypes = "distinct";
 static int32 statistic_types = -1;
 static int extstat_columns_limit = 7; /* Don't allow to be too expensive */
@@ -287,7 +283,7 @@ pg_index_stats_build_int(Relation rel)
 			goto cleanup;
 
 		analyseList = analyze_relation_statistics(heapId, atts_used, exprlst);
-		if (bms_is_empty(check_duplicated(analyseList)))
+		if (bms_is_empty(check_duplicated(analyseList, stat_types)))
 			/* Just for now, don't allow duplicates */
 			goto cleanup;
 
