@@ -51,4 +51,6 @@ SELECT pg_index_stats_build('abc_idx');
 \dX
 
 DROP TABLE abc, test CASCADE;
+RESET pg_index_stats.columns_limit;
+RESET pg_index_stats.stattypes;
 DROP EXTENSION pg_index_stats;
