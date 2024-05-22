@@ -33,7 +33,7 @@ ANALYZE is_test;
 SELECT check_estimated_rows('
   SELECT * FROM is_test WHERE x1=9 AND x2=9 AND x3=9 AND x4=9');
 
-SET pg_index_stats.stattypes = 'ndistinct, deps';
+SET pg_index_stats.stattypes = 'distinct, deps';
 CREATE INDEX ist_idx on is_test (x1,x2,x3,x4);
 ANALYZE;
 \dX
@@ -42,5 +42,11 @@ WHERE description LIKE 'pg_index_stats%';
 -- ndistinct statistics should give good estimation alone, shouldn't it?
 SELECT check_estimated_rows('
   SELECT * FROM is_test WHERE x1=9 AND x2=9 AND x3=9 AND x4=9');
+
+-- test duplicated statistics
+CREATE INDEX ist_idx_dupl on is_test (x2,x1,x3,x4);
+ANALYZE;
+-- We have to see here only one extended statistics record.
+\dX
 
 DROP TABLE is_test CASCADE;
