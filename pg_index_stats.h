@@ -7,9 +7,13 @@
 
 #define MODULE_NAME "pg_index_stats"
 
+#define STAT_NDISTINCT		(1<<0)
+#define STAT_MCV			(1<<1)
+#define STAT_DEPENDENCIES	(1<<2)
+
 extern List * analyze_relation_statistics(Oid heapOid,
 										  Bitmapset *columns,
 										  List *exprs);
-extern Bitmapset *check_duplicated(List *statList);
+extern Bitmapset *check_duplicated(List *statList, int32 stat_types);
 
 #endif							/* PG_INDEX_STATS_H */

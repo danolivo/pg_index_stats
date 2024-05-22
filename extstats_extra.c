@@ -49,10 +49,6 @@ typedef struct StatExtEntry
 #define CMPTYPE_INTERCEPT	(4) /* Both definitions have some unique elements */
 #define CMPTYPE_NONE		(5) /* Nothing in common */
 
-#define STAT_MCV			(0x01)
-#define STAT_DEP			(0x02)
-#define STAT_NDISTINCT		(0x04)
-
 typedef struct StatAnalyzeResult
 {
 	int8			cmptype;
@@ -324,25 +320,34 @@ analyze_relation_statistics(Oid heapOid, Bitmapset *columns, List *exprs)
 }
 
 Bitmapset *
-check_duplicated(List *statList)
+check_duplicated(List *statList, int32 stat_types)
 {
 	ListCell *lc;
 	Bitmapset *missed = NULL;
 
-	missed = bms_add_member(missed, (int) STATS_EXT_NDISTINCT);
-	missed = bms_add_member(missed, (int) STATS_EXT_DEPENDENCIES);
-	missed = bms_add_member(missed, (int) STATS_EXT_MCV);
+	if (stat_types & STAT_NDISTINCT)
+		missed = bms_add_member(missed, (int) STATS_EXT_NDISTINCT);
+	if (stat_types & STAT_MCV)
+		missed = bms_add_member(missed, (int) STATS_EXT_MCV);
+	if (stat_types & STAT_DEPENDENCIES)
+		missed = bms_add_member(missed, (int) STATS_EXT_DEPENDENCIES);
 
 	foreach (lc, statList)
 	{
 		StatAnalyzeResult *stat = (StatAnalyzeResult *) lfirst(lc);
 
 		if (stat->cmptype == CMPTYPE_DEFMATCH)
+		{
 			/*
 			 * Stat stored contains the same definition. Exclude from the newly
 			 * created statistics already existed fields.
 			 */
 			missed = bms_del_members(missed, stat->stat_matched);
+			elog(DEBUG2, "Duplicated statistic definition, but absent of something: distinct: %d, mcv: %d, deps: %d",
+				bms_is_member((int) STATS_EXT_NDISTINCT, missed),
+				bms_is_member((int) STATS_EXT_MCV, missed),
+				bms_is_member((int) STATS_EXT_DEPENDENCIES, missed));
+		}
 	}
 
 	return missed;
