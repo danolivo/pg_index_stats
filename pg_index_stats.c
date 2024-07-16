@@ -4,7 +4,7 @@
  *		Generate extended statistics on a definition of each newly created
  *		non-system index.
 
- * Copyright (c) 2023 Andrei Lepikhov
+ * Copyright (c) 2023-2024 Andrei Lepikhov
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.
@@ -29,6 +29,7 @@
 #include "commands/extension.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
+#include "statistics/statistics.h" /* Probe EXTSTAT_METHOD_LINEAR */
 #include "tcop/utility.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
@@ -261,6 +262,24 @@ pg_index_stats_build_int(Relation rel)
 		stmt->if_not_exists = true;
 		stmt->defnames = NULL;		/* qualified name (list of String) */
 		stmt->exprs = exprlst;
+
+		/*
+		 * Save computational resources on building extended statistics if
+		 * possible
+		 */
+		#ifdef EXTSTAT_METHOD_LINEAR
+		{
+			DefElem *def = makeNode(DefElem);
+			String	*value = makeNode(String);
+
+			def->defname = pstrdup("method");
+			value->sval = pstrdup("linear");
+			def->arg = (Node *) value;
+
+			Assert(stmt->options == NIL);
+			stmt->options = list_make1(def);
+		}
+		#endif
 
 		if (bms_is_member((int) STATS_EXT_NDISTINCT, stat_types))
 			stmt->stat_types = lappend(stmt->stat_types, makeString("ndistinct"));

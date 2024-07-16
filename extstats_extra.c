@@ -4,7 +4,7 @@
  *		Extra code to operate with extended statistics. Should correspond to any
  *		changes in extended_stats.c
 
- * Copyright (c) 2023 Andrei Lepikhov
+ * Copyright (c) 2023-2024 Andrei Lepikhov
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.
@@ -20,6 +20,8 @@
 #include "access/genam.h"
 #include "access/table.h"
 #include "catalog/pg_statistic_ext.h"
+#include "commands/comment.h"
+#include "statistics/statistics.h"
 #include "utils/rel.h"
 
 typedef struct StatExtEntry
@@ -62,119 +64,6 @@ typedef struct StatAnalyzeResult
 
 	StatExtEntry   *ref;
 } StatAnalyzeResult;
-
-#include "access/htup_details.h"
-#include "catalog/pg_type.h"
-#include "commands/comment.h"
-#include "nodes/nodeFuncs.h"
-#include "optimizer/optimizer.h"
-#include "utils/array.h"
-#include "utils/builtins.h"
-#include "utils/fmgroids.h"
-#include "utils/lsyscache.h"
-#include "utils/syscache.h"
-
-/*
- * Extract auto-generated statistics
- */
-static List *
-fetch_statentries_for_relation(Relation pg_statext, Oid relid)
-{
-	SysScanDesc scan;
-	ScanKeyData skey;
-	HeapTuple	htup;
-	List	   *result = NIL;
-
-	/*
-	 * Prepare to scan pg_statistic_ext for entries having stxrelid = this
-	 * rel.
-	 */
-	ScanKeyInit(&skey,
-				Anum_pg_statistic_ext_stxrelid,
-				BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(relid));
-
-	scan = systable_beginscan(pg_statext, StatisticExtRelidIndexId, true,
-							  NULL, 1, &skey);
-
-	while (HeapTupleIsValid(htup = systable_getnext(scan)))
-	{
-		StatExtEntry *entry;
-		Datum		datum;
-		bool		isnull;
-		int			i;
-		ArrayType  *arr;
-		char	   *enabled;
-		Form_pg_statistic_ext staForm;
-		List	   *exprs = NIL;
-
-		entry = palloc0(sizeof(StatExtEntry));
-		staForm = (Form_pg_statistic_ext) GETSTRUCT(htup);
-		entry->statOid = staForm->oid;
-
-		entry->schema = get_namespace_name(staForm->stxnamespace);
-		entry->name = pstrdup(NameStr(staForm->stxname));
-		entry->stattarget = staForm->stxstattarget;
-		for (i = 0; i < staForm->stxkeys.dim1; i++)
-		{
-			entry->columns = bms_add_member(entry->columns,
-											staForm->stxkeys.values[i]);
-		}
-
-		/* decode the stxkind char array into a list of chars */
-		datum = SysCacheGetAttrNotNull(STATEXTOID, htup,
-									   Anum_pg_statistic_ext_stxkind);
-		arr = DatumGetArrayTypeP(datum);
-		if (ARR_NDIM(arr) != 1 ||
-			ARR_HASNULL(arr) ||
-			ARR_ELEMTYPE(arr) != CHAROID)
-			elog(ERROR, "stxkind is not a 1-D char array");
-		enabled = (char *) ARR_DATA_PTR(arr);
-		for (i = 0; i < ARR_DIMS(arr)[0]; i++)
-		{
-			Assert((enabled[i] == STATS_EXT_NDISTINCT) ||
-				   (enabled[i] == STATS_EXT_DEPENDENCIES) ||
-				   (enabled[i] == STATS_EXT_MCV) ||
-				   (enabled[i] == STATS_EXT_EXPRESSIONS));
-			entry->types = lappend_int(entry->types, (int) enabled[i]);
-		}
-
-		/* decode expression (if any) */
-		datum = SysCacheGetAttr(STATEXTOID, htup,
-								Anum_pg_statistic_ext_stxexprs, &isnull);
-
-		if (!isnull)
-		{
-			char	   *exprsString;
-
-			exprsString = TextDatumGetCString(datum);
-			exprs = (List *) stringToNode(exprsString);
-
-			pfree(exprsString);
-
-			/*
-			 * Run the expressions through eval_const_expressions. This is not
-			 * just an optimization, but is necessary, because the planner
-			 * will be comparing them to similarly-processed qual clauses, and
-			 * may fail to detect valid matches without this.  We must not use
-			 * canonicalize_qual, however, since these aren't qual
-			 * expressions.
-			 */
-			exprs = (List *) eval_const_expressions(NULL, (Node *) exprs);
-
-			/* May as well fix opfuncids too */
-			fix_opfuncids((Node *) exprs);
-		}
-
-		entry->exprs = exprs;
-
-		result = lappend(result, entry);
-	}
-
-	systable_endscan(scan);
-
-	return result;
-}
 
 /*
  * Pass through all extended statistics on the table.

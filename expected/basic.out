@@ -111,12 +111,12 @@ SELECT pg_index_stats_build('abc_idx');
  -- Must see one more statistic because of new limit (including x1)
  -- Don't need new univariate statistics because we already have generated it
 \dX
-                                                  List of extended statistics
- Schema |             Name             |                    Definition                    | Ndistinct | Dependencies |   MCV   
---------+------------------------------+--------------------------------------------------+-----------+--------------+---------
- public | abc_expr_stat                | (ROW(x2, x4, x1 * x1 / x4, x5, x3, x1)) FROM abc |           |              | 
- public | abc_x2_x4_expr_x5_x3_stat    | x2, x3, x4, x5, (x1 * x1 / x4) FROM abc          | defined   | defined      | defined
- public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc      | defined   | defined      | defined
+                                                           List of extended statistics
+ Schema |             Name             |                    Definition                    |     options     | Ndistinct | Dependencies |   MCV   
+--------+------------------------------+--------------------------------------------------+-----------------+-----------+--------------+---------
+ public | abc_expr_stat                | (ROW(x2, x4, x1 * x1 / x4, x5, x3, x1)) FROM abc | {method=linear} |           |              | 
+ public | abc_x2_x4_expr_x5_x3_stat    | x2, x3, x4, x5, (x1 * x1 / x4) FROM abc          | {method=linear} | defined   | defined      | defined
+ public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc      | {method=linear} | defined   | defined      | defined
 (3 rows)
 
 SELECT count(*) FROM pg_description
@@ -135,10 +135,10 @@ SELECT * FROM pg_index_stats_remove();
 (1 row)
 
 \dX
-                                    List of extended statistics
- Schema |      Name      |             Definition              | Ndistinct | Dependencies |   MCV   
---------+----------------+-------------------------------------+-----------+--------------+---------
- public | manually_built | x1, x3, (x2 || '2.'::text) FROM abc | defined   | defined      | defined
+                                         List of extended statistics
+ Schema |      Name      |             Definition              | options | Ndistinct | Dependencies |   MCV   
+--------+----------------+-------------------------------------+---------+-----------+--------------+---------
+ public | manually_built | x1, x3, (x2 || '2.'::text) FROM abc |         | defined   | defined      | defined
 (1 row)
 
 SELECT count(*) FROM pg_description
@@ -158,12 +158,12 @@ SELECT pg_index_stats_build('abc_idx');
 (1 row)
 
 \dX
-                                               List of extended statistics
- Schema |             Name             |                 Definition                  | Ndistinct | Dependencies |   MCV   
---------+------------------------------+---------------------------------------------+-----------+--------------+---------
- public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   | defined      | 
- public | manually_built               | x1, x3, (x2 || '2.'::text) FROM abc         | defined   | defined      | defined
- public | manually_built_1             | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc |           |              | defined
+                                                        List of extended statistics
+ Schema |             Name             |                 Definition                  |     options     | Ndistinct | Dependencies |   MCV   
+--------+------------------------------+---------------------------------------------+-----------------+-----------+--------------+---------
+ public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | {method=linear} | defined   | defined      | 
+ public | manually_built               | x1, x3, (x2 || '2.'::text) FROM abc         |                 | defined   | defined      | defined
+ public | manually_built_1             | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc |                 |           |              | defined
 (3 rows)
 
 DROP TABLE abc, test CASCADE;
