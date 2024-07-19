@@ -4,7 +4,7 @@
  *		Extra code to operate with extended statistics. Should correspond to any
  *		changes in extended_stats.c
 
- * Copyright (c) 2023 Andrei Lepikhov
+ * Copyright (c) 2023-2024 Andrei Lepikhov
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.
@@ -71,6 +71,9 @@ typedef struct StatAnalyzeResult
 /*
  * Extract auto-generated statistics
  */
+
+ /* Be careful with versions */
+#if PG_VERSION_NUM < 170000
 static List *
 fetch_statentries_for_relation(Relation pg_statext, Oid relid)
 {
@@ -168,6 +171,7 @@ fetch_statentries_for_relation(Relation pg_statext, Oid relid)
 
 	return result;
 }
+#endif
 
 /*
  * Pass through all extended statistics on the table.
