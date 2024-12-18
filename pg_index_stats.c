@@ -215,7 +215,6 @@ pg_index_stats_build_int(Relation rel)
 		int					i;
 		Bitmapset		   *atts_used = NULL;
 		List			   *exprlst = NIL;
-		List			   *analyseList;
 
 		heapId = IndexGetRelation(indexId, false);
 		hrel = relation_open(heapId, AccessShareLock);
@@ -280,11 +279,6 @@ pg_index_stats_build_int(Relation rel)
 
 		if (list_length(exprlst) < 2)
 			/* Extended statistics can be made only for two or more expressions */
-			goto cleanup;
-
-		analyseList = analyze_relation_statistics(heapId, atts_used, exprlst);
-		if (bms_is_empty(check_duplicated(analyseList, stat_types)))
-			/* Just for now, don't allow duplicates */
 			goto cleanup;
 
 		/* Still only one relation allowed in the core */

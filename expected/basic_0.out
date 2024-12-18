@@ -1,0 +1,171 @@
+CREATE EXTENSION pg_index_stats;
+SET pg_index_stats.stattypes = '';
+CREATE TABLE test(x int, y numeric);
+CREATE INDEX abc1 ON test(x,(y*y));
+CREATE INDEX abc2 ON test(x,y);
+SELECT pg_index_stats_build('abc2');
+ pg_index_stats_build 
+----------------------
+ t
+(1 row)
+
+\d test
+                Table "public.test"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ x      | integer |           |          | 
+ y      | numeric |           |          | 
+Indexes:
+    "abc1" btree (x, (y * y))
+    "abc2" btree (x, y)
+Statistics objects:
+    "public.test_x_y_stat" (ndistinct) ON x, y FROM test
+
+SELECT pg_index_stats_build('abc1');
+ pg_index_stats_build 
+----------------------
+ t
+(1 row)
+
+\d test
+                Table "public.test"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ x      | integer |           |          | 
+ y      | numeric |           |          | 
+Indexes:
+    "abc1" btree (x, (y * y))
+    "abc2" btree (x, y)
+Statistics objects:
+    "public.test_x_expr_stat" (ndistinct) ON x, (y * y) FROM test
+    "public.test_x_y_stat" (ndistinct) ON x, y FROM test
+
+REINDEX INDEX abc2;
+REINDEX INDEX CONCURRENTLY abc1;
+\d test
+                Table "public.test"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ x      | integer |           |          | 
+ y      | numeric |           |          | 
+Indexes:
+    "abc1" btree (x, (y * y))
+    "abc2" btree (x, y)
+Statistics objects:
+    "public.test_x_expr_stat" (ndistinct) ON x, (y * y) FROM test
+    "public.test_x_y_stat" (ndistinct) ON x, y FROM test
+
+DROP INDEX abc2;
+\d test
+                Table "public.test"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ x      | integer |           |          | 
+ y      | numeric |           |          | 
+Indexes:
+    "abc1" btree (x, (y * y))
+Statistics objects:
+    "public.test_x_expr_stat" (ndistinct) ON x, (y * y) FROM test
+
+DROP EXTENSION pg_index_stats;
+\d test
+                Table "public.test"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ x      | integer |           |          | 
+ y      | numeric |           |          | 
+Indexes:
+    "abc1" btree (x, (y * y))
+
+CREATE TABLE abc(x1 integer, x2 text, x3 name, x4 bigint, x5 text);
+INSERT INTO abc SELECT x, 'abc' || x, 'def' || -x, x*100, 'constant'
+FROM generate_series(1,1000) AS x;
+-- Check limits
+SET pg_index_stats.stattypes = 'all';
+SET pg_index_stats.columns_limit = 5;
+CREATE INDEX abc_idx ON abc(x2, x4, (x1*x1/x4), x5, x4, x3, x2, x1);
+-- Must generate all multivariate statistics without preliminary execution of
+-- CREATE EXTENSION statement - it just provides some service routines.
+-- Must be only on the first five index expressions
+\d abc
+                Table "public.abc"
+ Column |  Type   | Collation | Nullable | Default 
+--------+---------+-----------+----------+---------
+ x1     | integer |           |          | 
+ x2     | text    |           |          | 
+ x3     | name    |           |          | 
+ x4     | bigint  |           |          | 
+ x5     | text    |           |          | 
+Indexes:
+    "abc_idx" btree (x2, x4, (x1 * x1 / x4), x5, x4, x3, x2, x1)
+Statistics objects:
+    "public.abc_x2_x4_expr_x5_x3_stat" ON x2, x3, x4, x5, (x1 * x1 / x4) FROM abc
+
+CREATE EXTENSION pg_index_stats;
+SET pg_index_stats.columns_limit = 8;
+SELECT pg_index_stats_build('abc_idx');
+ pg_index_stats_build 
+----------------------
+ t
+(1 row)
+
+-- Must see one more statistic because of new limit (including x1)
+\dX
+                                                    List of extended statistics
+ Schema |             Name             |                 Definition                  | options | Ndistinct | Dependencies |   MCV   
+--------+------------------------------+---------------------------------------------+---------+-----------+--------------+---------
+ public | abc_x2_x4_expr_x5_x3_stat    | x2, x3, x4, x5, (x1 * x1 / x4) FROM abc     |         | defined   | defined      | defined
+ public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc |         | defined   |              | 
+(2 rows)
+
+SELECT count(*) FROM pg_description
+WHERE description LIKE 'pg_index_stats%';
+ count 
+-------
+     2
+(1 row)
+
+-- Check removing only auto-generated statistics.
+CREATE STATISTICS manually_built ON x1,x3,(x2||'2.') FROM abc;
+SELECT * FROM pg_index_stats_remove();
+ pg_index_stats_remove 
+-----------------------
+                     2
+(1 row)
+
+\dX
+                                         List of extended statistics
+ Schema |      Name      |             Definition              | options | Ndistinct | Dependencies |   MCV   
+--------+----------------+-------------------------------------+---------+-----------+--------------+---------
+ public | manually_built | x1, x3, (x2 || '2.'::text) FROM abc |         | defined   | defined      | defined
+(1 row)
+
+SELECT count(*) FROM pg_description
+WHERE description LIKE 'pg_index_stats%';
+ count 
+-------
+     0
+(1 row)
+
+-- Test for duplicated statistics. We must create extstat on the same list of
+-- expressions but with MCV excluded.
+CREATE STATISTICS manually_built_1 (mcv) ON x2, x4, (x1*x1/x4), x5, x3, x1 FROM abc;
+SELECT pg_index_stats_build('abc_idx');
+ pg_index_stats_build 
+----------------------
+ t
+(1 row)
+
+\dX
+                                                    List of extended statistics
+ Schema |             Name             |                 Definition                  | options | Ndistinct | Dependencies |   MCV   
+--------+------------------------------+---------------------------------------------+---------+-----------+--------------+---------
+ public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc |         | defined   |              | 
+ public | manually_built               | x1, x3, (x2 || '2.'::text) FROM abc         |         | defined   | defined      | defined
+ public | manually_built_1             | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc |         |           |              | defined
+(3 rows)
+
+DROP TABLE abc, test CASCADE;
+RESET pg_index_stats.columns_limit;
+RESET pg_index_stats.stattypes;
+DROP EXTENSION pg_index_stats;
