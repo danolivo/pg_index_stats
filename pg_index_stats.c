@@ -4,7 +4,7 @@
  *		Generate extended statistics on a definition of each newly created
  *		non-system index.
 
- * Copyright (c) 2023-2024 Andrei Lepikhov
+ * Copyright (c) 2023-2025 Andrei Lepikhov
  *
  * This software may be modified and distributed under the terms
  * of the MIT license. See the LICENSE file for details.
