@@ -50,13 +50,13 @@ BEGIN
   PERFORM pg_index_stats_remove();
 
   SELECT count(*) FROM (
-    SELECT pg_index_stats_build((c.oid::regclass)::text)
+    SELECT pg_index_stats_build((c.oid::regclass)::text) AS value
 	FROM pg_class c, pg_namespace n
     WHERE
       c.relkind = 'i' AND
       c.relnamespace = n.oid AND
       n.nspname NOT IN ('pg_catalog', 'pg_toast', 'information_schema')
-  ) AS q1
+  ) AS q1(value) WHERE q1.value = true
   INTO result;
 
   RETURN result;
