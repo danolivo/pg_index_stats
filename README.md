@@ -9,6 +9,31 @@ According to the [postgres docs](https://www.postgresql.org/docs/current/planner
 * Function `pg_index_stats_remove()` - remove all previously automatically generated statistics.
 * Function `pg_index_stats_rebuild()` - remove old and create new extended statistics over non-system indexes existed in the database. 
 
+## Installation
+1. Download or `git clone` source code
+2. setup environment variables to reference desired installation. Something like following:
+```
+export USE_PGXS=1
+export PATH=/usr/pgsql-16/bin:/usr/pgsql-16/share:$PATH
+```
+3. In the extension folder execute:
+```
+make
+make install
+```
+
+## Usage
+After installation, load the extension statically (see `shared_preload_libraries`), dynamically (by the `LOAD` command), or execute the `CREATE EXTENSION pg_index_stats` statement.
+When loaded, the extension will create extended statistics on any non-system index definition. Use the `\dX` command to observe extended statistics in the database.
+If you want to build extended statistics over the database defined before the extension loading, use the pg_index_stats_rebuild routine. For example:
+```
+CREATE TABLE test(x integer, y integer);
+CREATE INDEX ON test (x,y);
+CREATE EXTENSION pg_index_stats;
+SELECT pg_index_stats_rebuild();
+```
+The function `pg_index_stats_rebuild` will pass over all the database non-system tables and build extended statistics according to the definition of each index containing more than one column.
+
 ## Notes
 * Each created statistics depends on the index and the `pg_index_stats` extension. Hence, dropping an index you remove corresponding auto-generated extended statistics. Dropping `pg_index_stats` extension you will remove all auto-generated statistics in the database.
 * Although multivariate case is trivial (it will be used by the core natively after an ANALYZE finished), univariate one (histogram and MCV on the ROW()) isn't used by the core and we should invent something - can we implement some code under the get_relation_stats_hook and/or get_index_stats_hook ?
