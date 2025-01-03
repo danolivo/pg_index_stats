@@ -258,7 +258,7 @@ pg_index_stats_build_int(Relation rel)
 					continue;
 
 				selem = makeNode(StatsElem);
-				selem->name = pstrdup(tupdesc->attrs[atnum - 1].attname.data);
+				selem->name = pstrdup(TupleDescAttr(tupdesc, atnum - 1)->attname.data);
 				selem->expr = NULL;
 				atts_used = bms_add_member(atts_used, atnum);
 			}
