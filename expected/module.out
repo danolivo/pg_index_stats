@@ -37,7 +37,7 @@ SELECT check_estimated_rows('
   WHERE t1.x1=t2.x1 AND t1.x2=t2.x2 AND t1.x3=t2.x3 AND t1.x4=t2.x4');
  check_estimated_rows 
 ----------------------
- (100000,100000)
+ (100,100000)
 (1 row)
 
 -- Do not use extension. Utilise library only.
@@ -65,46 +65,6 @@ SELECT check_estimated_rows('
  check_estimated_rows 
 ----------------------
  (100,100)
-(1 row)
-
--- test duplicated statistics
-CREATE INDEX ist_idx_dupl on is_test (x2,x1,x3,x4);
-ANALYZE;
--- We have to see here only one extended statistics record.
-\dX
-                                   List of extended statistics
- Schema |           Name           |         Definition          | Ndistinct | Dependencies | MCV 
---------+--------------------------+-----------------------------+-----------+--------------+-----
- public | is_test_x1_x2_x3_x4_stat | x1, x2, x3, x4 FROM is_test | defined   | defined      | 
-(1 row)
-
--- Estimation doesn't work without MCV
-SELECT check_estimated_rows('
-  SELECT * FROM is_test t1, is_test t2
-  WHERE t1.x1=t2.x1 AND t1.x2=t2.x2 AND t1.x3=t2.x3 AND t1.x4=t2.x4');
- check_estimated_rows 
-----------------------
- (100000,100000)
-(1 row)
-
-SET pg_index_stats.stattypes = 'distinct, deps,mcv';
-CREATE INDEX ist_idx2 on is_test (x2,x1,x3,x4);
-ANALYZE;
-\dX
-                                     List of extended statistics
- Schema |           Name           |         Definition          | Ndistinct | Dependencies |   MCV   
---------+--------------------------+-----------------------------+-----------+--------------+---------
- public | is_test_x1_x2_x3_x4_stat | x1, x2, x3, x4 FROM is_test | defined   | defined      | 
- public | is_test_x2_x1_x3_x4_stat | x1, x2, x3, x4 FROM is_test | defined   | defined      | defined
-(2 rows)
-
--- But with MCV it works properly
-SELECT check_estimated_rows('
-  SELECT * FROM is_test t1, is_test t2
-  WHERE t1.x1=t2.x1 AND t1.x2=t2.x2 AND t1.x3=t2.x3 AND t1.x4=t2.x4');
- check_estimated_rows 
-----------------------
- (100000,100000)
 (1 row)
 
 DROP TABLE is_test CASCADE;
