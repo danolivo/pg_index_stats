@@ -1,5 +1,6 @@
 # pg_index_stats
-Lightweight extension to PostgreSQL. Provide manual and automatic machinery for generating extended statistics based on definition of indexes.
+Lightweight extension for PostgreSQL that generates extended statistics based on index definitions. It introduces dependency of the statistics on the corresponding index.
+
 According to the [postgres docs](https://www.postgresql.org/docs/current/planner-stats.html#PLANNER-STATS-EXTENDED) it is impractical to compute multivariate statistics automatically. Our conjecture here is that index structure reflects that a specific set of columns and extensions is most frequently used for extracting data, and it is critical to build optimal query plans when combinations of these columns are involved.
 
 ## Interface
