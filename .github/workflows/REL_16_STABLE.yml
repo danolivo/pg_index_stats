@@ -84,9 +84,12 @@ jobs:
 
     - name: "Launch an instance"
       run: |
-        cd $PG_DIR
+        cd $PG_DIR/contrib/pg_index_stats
+        make
+        make install
 
         # Launch an instance with the extension
+        cd $PG_DIR
         instance_launch.sh
 
     - name: "Extension make installcheck"
@@ -94,12 +97,6 @@ jobs:
         cd $PG_DIR/contrib/pg_index_stats
         pg_config
         pg_config --pgxs
-        make
-        make install
-
-        # initdb --locale=en_US.UTF-8
-        # pg_ctl -w -l logfile.log start
-        # createdb postgres
         make installcheck
 
     - name: Archive artifacts
@@ -108,6 +105,8 @@ jobs:
       with:
         name: make_check_logs
         path: |
+          ${{ env.PG_DIR }}/contrib/pg_index_stats/logfile.log
+          ${{ env.PG_DIR }}/contrib/pg_index_stats/config.log
           ${{ env.PG_DIR }}/contrib/pg_index_stats/regression.diffs
           ${{ env.PG_DIR }}/contrib/pg_index_stats/log
           ${{ env.PG_DIR }}/contrib/pg_index_stats/tmp_check/log
