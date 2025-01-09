@@ -1,4 +1,5 @@
 CREATE EXTENSION pg_index_stats;
+SET pg_index_stats.columns_limit = 5;
 SET pg_index_stats.stattypes = '';
 CREATE TABLE test(x int, y numeric);
 CREATE INDEX abc1 ON test(x,(y*y));

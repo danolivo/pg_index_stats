@@ -1,3 +1,5 @@
+SET pg_index_stats.columns_limit = 5;
+
 -- Copied from stats_ext.sql
 create function check_estimated_rows(text) returns table (estimated int, actual int)
 language plpgsql as
