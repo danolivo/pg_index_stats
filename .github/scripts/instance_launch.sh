@@ -30,6 +30,7 @@ fi
 # Speed up the 'Join Order Benchmark' test
 echo "fsync = off" >> $M/postgresql.conf
 echo "autovacuum = 'off'" >> $M/postgresql.conf
+echo "shared_preload_libraries = 'pg_index_stats'" >> $M/postgresql.conf
 
 pg_ctl -w -D $M -l logfile.log start
 createdb $U
