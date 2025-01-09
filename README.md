@@ -4,7 +4,7 @@ Lightweight extension for PostgreSQL that generates extended statistics based on
 According to the [postgres docs](https://www.postgresql.org/docs/current/planner-stats.html#PLANNER-STATS-EXTENDED) it is impractical to compute multivariate statistics automatically. Our conjecture here is that index structure reflects that a specific set of columns and extensions is most frequently used for extracting data, and it is critical to build optimal query plans when combinations of these columns are involved.
 
 ## Interface
-* Integer GUC `pg_index_stats.columns_limit` - number of first columns of an index which will be involved in multivariate statistics creation (**default 5**).
+* Integer GUC `pg_index_stats.columns_limit` - number of first columns of an index which will be involved in extended statistics creation (**default 5**). Set its value to 0 if you want to pause generation of new statistics.
 * Function `pg_index_stats_build(idxname, mode DEFAULT 'mcv, distinct')` - manually create extended statistics on an expression defined by formula of the index `idxname`.
 * Function `pg_index_stats_remove()` - remove all previously automatically generated statistics.
 * Function `pg_index_stats_rebuild()` - remove old and create new extended statistics over non-system indexes existed in the database.

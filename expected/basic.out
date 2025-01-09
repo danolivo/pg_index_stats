@@ -19,7 +19,7 @@ Indexes:
     "abc1" btree (x, (y * y))
     "abc2" btree (x, y)
 Statistics objects:
-    "public.test_x_y_stat" (ndistinct) ON x, y FROM test
+    "public.test_x_y_stat" (ndistinct, mcv) ON x, y FROM test
 
 SELECT pg_index_stats_build('abc1');
  pg_index_stats_build 
@@ -37,8 +37,8 @@ Indexes:
     "abc1" btree (x, (y * y))
     "abc2" btree (x, y)
 Statistics objects:
-    "public.test_x_expr_stat" (ndistinct) ON x, (y * y) FROM test
-    "public.test_x_y_stat" (ndistinct) ON x, y FROM test
+    "public.test_x_expr_stat" (ndistinct, mcv) ON x, (y * y) FROM test
+    "public.test_x_y_stat" (ndistinct, mcv) ON x, y FROM test
 
 REINDEX INDEX abc2;
 REINDEX INDEX CONCURRENTLY abc1;
@@ -52,8 +52,8 @@ Indexes:
     "abc1" btree (x, (y * y))
     "abc2" btree (x, y)
 Statistics objects:
-    "public.test_x_expr_stat" (ndistinct) ON x, (y * y) FROM test
-    "public.test_x_y_stat" (ndistinct) ON x, y FROM test
+    "public.test_x_expr_stat" (ndistinct, mcv) ON x, (y * y) FROM test
+    "public.test_x_y_stat" (ndistinct, mcv) ON x, y FROM test
 
 DROP INDEX abc2;
 \d test
@@ -65,7 +65,7 @@ DROP INDEX abc2;
 Indexes:
     "abc1" btree (x, (y * y))
 Statistics objects:
-    "public.test_x_expr_stat" (ndistinct) ON x, (y * y) FROM test
+    "public.test_x_expr_stat" (ndistinct, mcv) ON x, (y * y) FROM test
 
 DROP EXTENSION pg_index_stats;
 \d test
@@ -115,7 +115,7 @@ SELECT pg_index_stats_build('abc_idx');
  Schema |             Name             |                 Definition                  | Ndistinct | Dependencies |   MCV   
 --------+------------------------------+---------------------------------------------+-----------+--------------+---------
  public | abc_x2_x4_expr_x5_x3_stat    | x2, x3, x4, x5, (x1 * x1 / x4) FROM abc     | defined   | defined      | defined
- public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   |              | 
+ public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   |              | defined
 (2 rows)
 
 SELECT count(*) FROM pg_description
@@ -160,7 +160,7 @@ SELECT pg_index_stats_build('abc_idx');
                                                List of extended statistics
  Schema |             Name             |                 Definition                  | Ndistinct | Dependencies |   MCV   
 --------+------------------------------+---------------------------------------------+-----------+--------------+---------
- public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   |              | 
+ public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   |              | defined
  public | manually_built               | x1, x3, (x2 || '2.'::text) FROM abc         | defined   | defined      | defined
  public | manually_built_1             | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc |           |              | defined
 (3 rows)

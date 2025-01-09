@@ -42,7 +42,7 @@ PG_FUNCTION_INFO_V1(pg_index_stats_build);
 
 static char *stattypes = "mcv, distinct";
 static int32 statistic_types = -1;
-static int extstat_columns_limit = 7; /* Don't allow to be too expensive */
+static int extstat_columns_limit = 5; /* Don't allow to be too expensive */
 
 void _PG_init(void);
 
@@ -141,6 +141,12 @@ pg_index_stats_build(PG_FUNCTION_ARGS)
 	Relation	rel;
 	bool		result;
 
+	if (extstat_columns_limit <= 0)
+	{
+		elog(WARNING, "Nothing to create because columns limit is too small");
+		PG_RETURN_BOOL(false);
+	}
+
 	SetConfigOption(MODULE_NAME".stattypes", cmode, PGC_SUSET, PGC_S_SESSION);
 
 	/* Get descriptor of incoming index relation */
@@ -179,7 +185,7 @@ pg_index_stats_build_int(Relation rel)
 	bool			result = false;
 	int32			stat_types = 0;
 
-	if ((stat_types = get_statistic_types()) == 0)
+	if (extstat_columns_limit <= 0 || (stat_types = get_statistic_types()) == 0)
 		return false;
 
 	/*
@@ -335,7 +341,14 @@ extstat_remember_index_hook(ObjectAccessType access, Oid classId,
 	if (next_object_access_hook)
 		(*next_object_access_hook) (access, classId, objectId, subId, arg);
 
-	if (get_statistic_types() == 0 || !IsNormalProcessingMode() ||
+	/*
+	 * Disable the extension machinery in some cases.
+	 * Changing that place remember, that we have UI to manually generate
+	 * extended statistics over existed schema. Sometimes, you need to change
+	 * that place as well.
+	 */
+	if (extstat_columns_limit <= 0 || get_statistic_types() == 0 ||
+		!IsNormalProcessingMode() ||
 		access != OAT_POST_CREATE || classId != RelationRelationId)
 		return;
 
@@ -367,6 +380,8 @@ after_utility_extstat_creation(PlannedStmt *pstmt, const char *queryString,
 	/* Quick exit on ROLLBACK or nothing to do */
 	if (!IsTransactionState() || index_candidates == NIL)
 		return;
+
+	Assert(extstat_columns_limit > 0);
 
 	PG_TRY();
 	{
@@ -426,11 +441,11 @@ _PG_init(void)
 							   NULL, assign_hook_stattypes, NULL);
 
 	DefineCustomIntVariable(MODULE_NAME".columns_limit",
-							"Sets the maximum number of columns involved in multivariate statistics",
+							"Sets the maximum number of columns involved in extended statistics",
 							NULL,
 							&extstat_columns_limit,
-							7,
-							2,
+							5,
+							0,
 							INT_MAX,
 							PGC_SUSET,
 							0,
