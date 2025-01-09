@@ -5,7 +5,7 @@ According to the [postgres docs](https://www.postgresql.org/docs/current/planner
 
 ## Interface
 * Integer GUC `pg_index_stats.columns_limit` - number of first columns of an index which will be involved in multivariate statistics creation (**default 5**).
-* Function `pg_index_stats_build(idxname, mode DEFAULT 'multivariate')` - manually create extended statistics on an expression defined by formula of the index `idxname`.
+* Function `pg_index_stats_build(idxname, mode DEFAULT 'mcv, distinct')` - manually create extended statistics on an expression defined by formula of the index `idxname`.
 * Function `pg_index_stats_remove()` - remove all previously automatically generated statistics.
 * Function `pg_index_stats_rebuild()` - remove old and create new extended statistics over non-system indexes existed in the database.
 
