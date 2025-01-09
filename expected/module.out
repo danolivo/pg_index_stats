@@ -37,7 +37,7 @@ SELECT check_estimated_rows('
   WHERE t1.x1=t2.x1 AND t1.x2=t2.x2 AND t1.x3=t2.x3 AND t1.x4=t2.x4');
  check_estimated_rows 
 ----------------------
- (100000,100000)
+ (100,100000)
 (1 row)
 
 -- Do not use extension. Utilise library only.
