@@ -459,5 +459,9 @@ _PG_init(void)
 	next_ProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = after_utility_extstat_creation;
 
+#if PG_VERSION_NUM < 150000
+	EmitWarningsOnPlaceholders(MODULE_NAME);
+#else
 	MarkGUCPrefixReserved(MODULE_NAME);
+#endif
 }

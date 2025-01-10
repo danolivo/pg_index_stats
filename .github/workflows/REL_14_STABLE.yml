@@ -1,8 +1,8 @@
-name: 'PostgreSQL 15 - Basic tests'
+name: 'PostgreSQL 14 - Basic tests'
 
 env:
   # Use it just for a report
-  PG_MAJOR_VERSION: 15
+  PG_MAJOR_VERSION: 14
   BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
 
 # Trigger it each time on push or pull request. It seems redundant

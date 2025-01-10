@@ -1,8 +1,7 @@
-name: 'PostgreSQL 15 - Basic tests'
+name: 'PostgreSQL master branch - Basic tests'
 
 env:
   # Use it just for a report
-  PG_MAJOR_VERSION: 15
   BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
 
 # Trigger it each time on push or pull request. It seems redundant
@@ -97,6 +96,7 @@ jobs:
         cd $PG_DIR/contrib/pg_index_stats
         pg_config
         pg_config --pgxs
+
         make installcheck
 
     - name: Archive artifacts
