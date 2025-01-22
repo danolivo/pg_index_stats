@@ -125,6 +125,9 @@ bool _create_statistics(CreateStatsStmt *stmt, Oid indexId)
 	ObjectAddressSet(refobj, RelationRelationId, indexId);
 	recordDependencyOn(&obj, &refobj, DEPENDENCY_AUTO);
 
+	/* Let next command to see newly created statistics */
+	CommandCounterIncrement();
+
 	return true;
 }
 
