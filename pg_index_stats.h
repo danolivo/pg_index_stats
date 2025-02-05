@@ -7,6 +7,10 @@
 
 #define MODULE_NAME "pg_index_stats"
 
+#define STAT_NDISTINCT_NAME		"ndistinct"
+#define STAT_MCV_NAME			"mcv"
+#define STAT_DEPENDENCIES_NAME	"dependencies"
+
 #define STAT_NDISTINCT		(1<<0)
 #define STAT_MCV			(1<<1)
 #define STAT_DEPENDENCIES	(1<<2)

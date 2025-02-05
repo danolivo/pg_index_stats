@@ -1,10 +1,13 @@
 CREATE EXTENSION pg_index_stats;
-SET pg_index_stats.columns_limit = 5;
-SET pg_index_stats.stattypes = '';
+SHOW pg_index_stats.stattypes;
+SET pg_index_stats.columns_limit = 0;
+SET pg_index_stats.stattypes = ''; -- ERROR
 
 CREATE TABLE test(x int, y numeric);
 CREATE INDEX abc1 ON test(x,(y*y));
 CREATE INDEX abc2 ON test(x,y);
+
+RESET pg_index_stats.columns_limit;
 SELECT pg_index_stats_build('abc2');
 \d test
 SELECT pg_index_stats_build('abc1');

@@ -39,7 +39,7 @@ SELECT check_estimated_rows('
 -- Do not use extension. Utilise library only.
 LOAD 'pg_index_stats';
 
-SET pg_index_stats.stattypes = 'distinct, deps';
+SET pg_index_stats.stattypes = 'ndistinct, dependencies';
 CREATE INDEX ist_idx on is_test (x1,x2,x3,x4);
 ANALYZE;
 \dX

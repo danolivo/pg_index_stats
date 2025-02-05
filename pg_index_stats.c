@@ -40,8 +40,9 @@ PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pg_index_stats_build);
 
-static char *stattypes = "mcv, distinct";
-static int32 statistic_types = -1;
+#define DEFAULT_STATTYPES STAT_MCV_NAME","STAT_NDISTINCT_NAME
+
+static char *stattypes = DEFAULT_STATTYPES;
 static int extstat_columns_limit = 5; /* Don't allow to be too expensive */
 
 void _PG_init(void);
@@ -53,32 +54,76 @@ static List *index_candidates = NIL;
 
 static bool pg_index_stats_build_int(Relation rel);
 
+static bool
+_check_stattypes_string(const char *str)
+{
+	List	   *elemlist = NIL;
+	ListCell   *lc;
+	char	   *tmp_str;
+
+	if (strlen(str) == 0)
+	{
+		GUC_check_errdetail("must not be empty");
+		return false;
+	}
+
+	tmp_str = pstrdup(str);
+
+	if (!SplitDirectoriesString(tmp_str, ',', &elemlist) || elemlist == NIL)
+	{
+		pfree(tmp_str);
+		GUC_check_errdetail("variable list format error");
+		return false;
+	}
+
+	pfree(tmp_str);
+
+	foreach(lc, elemlist)
+	{
+		char   *stattype = (char *) lfirst(lc);
+
+		if (strcmp(stattype, STAT_NDISTINCT_NAME) == 0)
+			continue;
+		else if (strcmp(stattype, STAT_MCV_NAME) == 0)
+			continue;
+		else if (strcmp(stattype, STAT_DEPENDENCIES_NAME) == 0)
+			continue;
+		else if (strcmp(stattype, "all") == 0)
+			continue;
+
+		GUC_check_errdetail("parameter %s is incorrect", stattype);
+		return false;
+	}
+
+	return true;
+}
+
 /*
  * Return set of statistic types that a user wants to be generated in auto mode.
  *
  * Later in the code we should check duplicated statistics. So, here is not a
  * final decision on which types of extended statistics we will see after the
  * index creation.
+ *
+ * It is expensive a little bit to use in each hook call. So, be careful or
+ * invent a cache.
  */
 static int32
 get_statistic_types()
 {
 	List	   *elemlist;
 	ListCell   *lc;
-
-	if (statistic_types != -1)
-		return statistic_types;
+	int			statistic_types = 0;
 
 	if (!SplitDirectoriesString(stattypes, ',', &elemlist))
 	{
 		/* syntax error in list */
-		ereport(FATAL,
+		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("invalid list syntax in parameter \"%s\"",
 						"statistic_types")));
 	}
 
-	statistic_types = 0;
 	if (elemlist == NIL)
 		return statistic_types;
 
@@ -86,19 +131,19 @@ get_statistic_types()
 	{
 		char   *stattype = (char *) lfirst(lc);
 
-		if (strcmp(stattype, "distinct") == 0)
+		if (strcmp(stattype, STAT_NDISTINCT_NAME) == 0)
 			statistic_types |= STAT_NDISTINCT;
-		else if (strcmp(stattype, "mcv") == 0)
+		else if (strcmp(stattype, STAT_MCV_NAME) == 0)
 			statistic_types |= STAT_MCV;
-		else if (strcmp(stattype, "deps") == 0)
+		else if (strcmp(stattype, STAT_DEPENDENCIES_NAME) == 0)
 			statistic_types |= STAT_DEPENDENCIES;
 		else if (strcmp(stattype, "all") == 0)
 			statistic_types = STAT_NDISTINCT | STAT_MCV | STAT_DEPENDENCIES;
 		else
-			ereport(FATAL,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("Invalid parameter \"%s\" in GUC \"%s\"",
-						stattype, "statistic_types")));
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("Invalid parameter \"%s\" in GUC \"%s\"",
+							stattype, "statistic_types")));
 	}
 
 	return statistic_types;
@@ -173,11 +218,14 @@ Datum
 pg_index_stats_build(PG_FUNCTION_ARGS)
 {
 	text	   *relname = PG_GETARG_TEXT_PP(0);
-	char	   *cmode = text_to_cstring(PG_GETARG_TEXT_PP(1));
-	const char *tmpmode = GetConfigOption(MODULE_NAME".stattypes", false, true);
+	char	   *stats_list = text_to_cstring(PG_GETARG_TEXT_PP(1));
+	const char *tmp_stats_list = GetConfigOption(MODULE_NAME".stattypes", false, true);
 	RangeVar   *relvar;
 	Relation	rel;
 	bool		result;
+
+	/* Check correctness of the stats string */
+	(void) get_statistic_types();
 
 	if (extstat_columns_limit <= 0)
 	{
@@ -185,7 +233,7 @@ pg_index_stats_build(PG_FUNCTION_ARGS)
 		PG_RETURN_BOOL(false);
 	}
 
-	SetConfigOption(MODULE_NAME".stattypes", cmode, PGC_SUSET, PGC_S_SESSION);
+	SetConfigOption(MODULE_NAME".stattypes", stats_list, PGC_SUSET, PGC_S_SESSION);
 
 	/* Get descriptor of incoming index relation */
 	relvar = makeRangeVarFromNameList(textToQualifiedNameList(relname));
@@ -201,7 +249,8 @@ pg_index_stats_build(PG_FUNCTION_ARGS)
 	result = pg_index_stats_build_int(rel);
 	relation_close(rel, AccessShareLock);
 
-	SetConfigOption(MODULE_NAME".stattypes", tmpmode, PGC_SUSET, PGC_S_SESSION);
+	/* XXX: In case of an ERROR it will be restored at the end of the function? */
+	SetConfigOption(MODULE_NAME".stattypes", tmp_stats_list, PGC_SUSET, PGC_S_SESSION);
 	PG_RETURN_BOOL(result);
 }
 
@@ -332,6 +381,8 @@ pg_index_stats_build_int(Relation rel)
 		 */
 		stat_types = _remove_duplicates(exprlst, indexInfo, stat_types);
 
+		elog(DEBUG2, "Final Auto-generated statistics definition: %d", stat_types);
+
 		/* Still only one relation allowed in the core */
 		stmt->relations = list_make1(from);
 		stmt->stxcomment = MODULE_NAME" - multivariate statistics";
@@ -341,11 +392,11 @@ pg_index_stats_build_int(Relation rel)
 		stmt->exprs = exprlst;
 
 		if (stat_types & STAT_NDISTINCT)
-			stmt->stat_types = lappend(stmt->stat_types, makeString("ndistinct"));
+			stmt->stat_types = lappend(stmt->stat_types, makeString(STAT_NDISTINCT_NAME));
 		if (stat_types & STAT_DEPENDENCIES)
-			stmt->stat_types = lappend(stmt->stat_types, makeString("dependencies"));
+			stmt->stat_types = lappend(stmt->stat_types, makeString(STAT_DEPENDENCIES_NAME));
 		if (stat_types & STAT_MCV)
-			stmt->stat_types = lappend(stmt->stat_types, makeString("mcv"));
+			stmt->stat_types = lappend(stmt->stat_types, makeString(STAT_MCV_NAME));
 		Assert(stmt->stat_types != NIL);
 
 		if (!_create_statistics(stmt, indexId))
@@ -392,7 +443,7 @@ extstat_remember_index_hook(ObjectAccessType access, Oid classId,
 	 * extended statistics over existed schema. Sometimes, you need to change
 	 * that place as well.
 	 */
-	if (extstat_columns_limit <= 0 || get_statistic_types() == 0 ||
+	if (extstat_columns_limit <= 0 ||
 		!IsNormalProcessingMode() ||
 		access != OAT_POST_CREATE || classId != RelationRelationId)
 		return;
@@ -423,8 +474,17 @@ after_utility_extstat_creation(PlannedStmt *pstmt, const char *queryString,
 	/* Now, we can create extended statistics */
 
 	/* Quick exit on ROLLBACK or nothing to do */
-	if (!IsTransactionState() || index_candidates == NIL)
+	if (index_candidates == NIL || !IsTransactionState() ||
+		IsA(pstmt->utilityStmt, ReindexStmt))
+	{
+		/*
+		 * HACK: We ignore ReindexStmt because don't understand exactly how to
+		 * avoid some issues caused by this command. Should be resolved.
+		 */
+		list_free(index_candidates);
+		index_candidates = NIL;
 		return;
+	}
 
 	Assert(extstat_columns_limit > 0);
 
@@ -467,11 +527,15 @@ after_utility_extstat_creation(PlannedStmt *pstmt, const char *queryString,
 	PG_END_TRY();
 }
 
-static void
-assign_hook_stattypes(const char *newval, void *extra)
+static bool
+check_hook_stattypes(char **newval, void **extra, GucSource source)
 {
-	statistic_types = -1;
+	if (!_check_stattypes_string(*newval))
+		return false;
+
+	return true;
 }
+
 
 void
 _PG_init(void)
@@ -480,10 +544,10 @@ _PG_init(void)
 							   "Types of statistics to be automatically created",
 							   NULL,
 							   &stattypes,
-							   "mcv, distinct",
+							   DEFAULT_STATTYPES,
 							   PGC_SUSET,
 							   0,
-							   NULL, assign_hook_stattypes, NULL);
+							   check_hook_stattypes, NULL, NULL);
 
 	DefineCustomIntVariable(MODULE_NAME".columns_limit",
 							"Sets the maximum number of columns involved in extended statistics",
