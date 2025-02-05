@@ -53,6 +53,13 @@ static List *index_candidates = NIL;
 
 static bool pg_index_stats_build_int(Relation rel);
 
+/*
+ * Return set of statistic types that a user wants to be generated in auto mode.
+ *
+ * Later in the code we should check duplicated statistics. So, here is not a
+ * final decision on which types of extended statistics we will see after the
+ * index creation.
+ */
 static int32
 get_statistic_types()
 {
@@ -97,8 +104,8 @@ get_statistic_types()
 	return statistic_types;
 }
 
-static
-bool _create_statistics(CreateStatsStmt *stmt, Oid indexId)
+static bool
+_create_statistics(CreateStatsStmt *stmt, Oid indexId)
 {
 	ObjectAddress	obj;
 	ObjectAddress	refobj;
@@ -129,6 +136,34 @@ bool _create_statistics(CreateStatsStmt *stmt, Oid indexId)
 	CommandCounterIncrement();
 
 	return true;
+}
+
+/*
+ * Decide on types of extended statistics that should stay in the definition.
+ */
+static int
+_remove_duplicates(const List *exprs, const IndexInfo *indexInfo, int32 stat_types)
+{
+	/*
+	 * Most simple decision: we have to left it in the definition if no exact
+	 * duplicate exists in the stat list.
+	 */
+	if (stat_types & STAT_MCV)
+	{
+		/* TODO */
+	}
+
+	if (stat_types & STAT_NDISTINCT)
+	{
+		/* TODO */
+	}
+
+	if (stat_types & STAT_DEPENDENCIES)
+	{
+		/* TODO */
+	}
+
+	return stat_types;
 }
 
 /*
@@ -246,7 +281,7 @@ pg_index_stats_build_int(Relation rel)
 
 		for (i = 0; i < indexInfo->ii_NumIndexKeyAttrs; i++)
 		{
-			AttrNumber	atnum = indexInfo->ii_IndexAttrNumbers[i];
+			AttrNumber	attnum = indexInfo->ii_IndexAttrNumbers[i];
 			StatsElem  *selem;
 
 			Assert(extstat_columns_limit > 1);
@@ -260,16 +295,16 @@ pg_index_stats_build_int(Relation rel)
 				break;
 			}
 
-			if (atnum != 0)
+			if (attnum != 0)
 			{
-				if (bms_is_member(atnum, atts_used))
+				if (bms_is_member(attnum, atts_used))
 					/* Can't build extended statistics with column duplicates */
 					continue;
 
 				selem = makeNode(StatsElem);
-				selem->name = pstrdup(TupleDescAttr(tupdesc, atnum - 1)->attname.data);
+				selem->name = pstrdup(TupleDescAttr(tupdesc, attnum - 1)->attname.data);
 				selem->expr = NULL;
-				atts_used = bms_add_member(atts_used, atnum);
+				atts_used = bms_add_member(atts_used, attnum);
 			}
 			else
 			{
@@ -289,6 +324,13 @@ pg_index_stats_build_int(Relation rel)
 		if (list_length(exprlst) < 2)
 			/* Extended statistics can be made only for two or more expressions */
 			goto cleanup;
+
+		/*
+		 * Now we have statistics definition. That's a good place to check other
+		 * statistics on the same relation and correct our definition to reduce
+		 * duplicated data as much as possible.
+		 */
+		stat_types = _remove_duplicates(exprlst, indexInfo, stat_types);
 
 		/* Still only one relation allowed in the core */
 		stmt->relations = list_make1(from);
