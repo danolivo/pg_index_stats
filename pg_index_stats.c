@@ -45,6 +45,9 @@ PG_FUNCTION_INFO_V1(pg_index_stats_build);
 static char *stattypes = DEFAULT_STATTYPES;
 static int extstat_columns_limit = 5; /* Don't allow to be too expensive */
 
+/* Local Memory Context to avoid multiple free commands */
+static MemoryContext mem_ctx = NULL;
+
 void _PG_init(void);
 
 static object_access_hook_type next_object_access_hook = NULL;
@@ -114,8 +117,12 @@ get_statistic_types()
 	List	   *elemlist;
 	ListCell   *lc;
 	int			statistic_types = 0;
+	char	   *tmp_stattypes;
+	MemoryContext oldctx;
 
-	if (!SplitDirectoriesString(stattypes, ',', &elemlist))
+	oldctx = MemoryContextSwitchTo(mem_ctx);
+	tmp_stattypes = pstrdup(stattypes);
+	if (!SplitDirectoriesString(tmp_stattypes, ',', &elemlist))
 	{
 		/* syntax error in list */
 		ereport(ERROR,
@@ -125,7 +132,10 @@ get_statistic_types()
 	}
 
 	if (elemlist == NIL)
-		return statistic_types;
+	{
+		MemoryContextSwitchTo(oldctx);
+		return 0;
+	}
 
 	foreach(lc, elemlist)
 	{
@@ -146,6 +156,8 @@ get_statistic_types()
 							stattype, "statistic_types")));
 	}
 
+	MemoryContextSwitchTo(oldctx);
+	MemoryContextReset(mem_ctx);
 	return statistic_types;
 }
 
@@ -567,6 +579,10 @@ _PG_init(void)
 
 	next_ProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = after_utility_extstat_creation;
+
+	mem_ctx = AllocSetContextCreate(TopMemoryContext,
+											 MODULE_NAME" - local memory context",
+											 ALLOCSET_DEFAULT_SIZES);
 
 #if PG_VERSION_NUM < 150000
 	EmitWarningsOnPlaceholders(MODULE_NAME);
