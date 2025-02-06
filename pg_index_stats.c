@@ -1,8 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * pg_index_stats.c
- *		Generate extended statistics on a definition of each newly created
- *		non-system index.
+ *		Generate extended statistics on a definition of non-system index.
 
  * Copyright (c) 2023-2025 Andrei Lepikhov
  *
@@ -15,7 +14,7 @@
  *-------------------------------------------------------------------------
  */
 
-#include "pg_index_stats.h"
+#include "postgres.h"
 
 #include "access/nbtree.h"
 #include "access/xact.h"
@@ -36,6 +35,9 @@
 #include "utils/rel.h"
 #include "utils/varlena.h"
 
+#include "pg_index_stats.h"
+#include "duplicated_slots.h"
+
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pg_index_stats_build);
@@ -46,7 +48,7 @@ static char *stattypes = DEFAULT_STATTYPES;
 static int extstat_columns_limit = 5; /* Don't allow to be too expensive */
 
 /* Local Memory Context to avoid multiple free commands */
-static MemoryContext mem_ctx = NULL;
+MemoryContext mem_ctx = NULL;
 
 void _PG_init(void);
 
@@ -193,34 +195,6 @@ _create_statistics(CreateStatsStmt *stmt, Oid indexId)
 	CommandCounterIncrement();
 
 	return true;
-}
-
-/*
- * Decide on types of extended statistics that should stay in the definition.
- */
-static int
-_remove_duplicates(const List *exprs, const IndexInfo *indexInfo, int32 stat_types)
-{
-	/*
-	 * Most simple decision: we have to left it in the definition if no exact
-	 * duplicate exists in the stat list.
-	 */
-	if (stat_types & STAT_MCV)
-	{
-		/* TODO */
-	}
-
-	if (stat_types & STAT_NDISTINCT)
-	{
-		/* TODO */
-	}
-
-	if (stat_types & STAT_DEPENDENCIES)
-	{
-		/* TODO */
-	}
-
-	return stat_types;
 }
 
 /*
@@ -394,7 +368,10 @@ pg_index_stats_build_int(Relation rel)
 		 * statistics on the same relation and correct our definition to reduce
 		 * duplicated data as much as possible.
 		 */
-		stat_types = _remove_duplicates(exprlst, indexInfo, stat_types);
+		stat_types = reduce_duplicated_stat(exprlst, atts_used, hrel, stat_types);
+		if (stat_types == 0)
+			/* Reduced to nothing */
+			goto cleanup;
 
 		elog(DEBUG2, "Final Auto-generated statistics definition: %d", stat_types);
 
