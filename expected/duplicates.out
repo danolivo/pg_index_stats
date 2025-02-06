@@ -6,6 +6,7 @@ INSERT INTO is_test (x1,x2,x3,x4)
   SELECT x%10,x%10,x%10,x%10 FROM generate_series(1,1E3) AS x;
 VACUUM ANALYZE is_test;
 CREATE INDEX ist_idx0 on is_test (x1,x2,x3,x4);
+CREATE INDEX ist_idx_1 on is_test (x2, (x3*x3));
 SHOW pg_index_stats.stattypes; --incorrect value still exists
  pg_index_stats.stattypes 
 --------------------------
@@ -28,6 +29,12 @@ SELECT pg_index_stats_build('ist_idx0');
  t
 (1 row)
 
+SELECT pg_index_stats_build('ist_idx_1', 'mcv, dependencies');
+ pg_index_stats_build 
+----------------------
+ t
+(1 row)
+
 CREATE INDEX ist_idx1 on is_test (x1,x2,x3,x4);
 CREATE INDEX ist_idx2 on is_test (x2,x1,x3,x4);
 \dX
@@ -35,14 +42,15 @@ CREATE INDEX ist_idx2 on is_test (x2,x1,x3,x4);
  Schema |           Name            |         Definition          | Ndistinct | Dependencies |   MCV   
 --------+---------------------------+-----------------------------+-----------+--------------+---------
  public | is_test_x1_x2_x3_x4_stat  | x1, x2, x3, x4 FROM is_test | defined   |              | defined
- public | is_test_x1_x2_x3_x4_stat1 | x1, x2, x3, x4 FROM is_test | defined   |              | defined
- public | is_test_x2_x1_x3_x4_stat  | x1, x2, x3, x4 FROM is_test | defined   |              | defined
-(3 rows)
+ public | is_test_x1_x2_x3_x4_stat1 | x1, x2, x3, x4 FROM is_test | defined   |              | 
+ public | is_test_x2_expr_stat      | x2, (x3 * x3) FROM is_test  |           | defined      | defined
+ public | is_test_x2_x1_x3_x4_stat  | x1, x2, x3, x4 FROM is_test | defined   |              | 
+(4 rows)
 
 SELECT pg_index_stats_rebuild(); -- must not have more duplicated stats
  pg_index_stats_rebuild 
 ------------------------
-                      3
+                      4
 (1 row)
 
 \dX
@@ -50,15 +58,22 @@ SELECT pg_index_stats_rebuild(); -- must not have more duplicated stats
  Schema |           Name            |         Definition          | Ndistinct | Dependencies |   MCV   
 --------+---------------------------+-----------------------------+-----------+--------------+---------
  public | is_test_x1_x2_x3_x4_stat  | x1, x2, x3, x4 FROM is_test | defined   |              | defined
- public | is_test_x1_x2_x3_x4_stat1 | x1, x2, x3, x4 FROM is_test | defined   |              | defined
- public | is_test_x2_x1_x3_x4_stat  | x1, x2, x3, x4 FROM is_test | defined   |              | defined
-(3 rows)
+ public | is_test_x1_x2_x3_x4_stat1 | x1, x2, x3, x4 FROM is_test | defined   |              | 
+ public | is_test_x2_expr_stat      | x2, (x3 * x3) FROM is_test  | defined   |              | defined
+ public | is_test_x2_x1_x3_x4_stat  | x1, x2, x3, x4 FROM is_test | defined   |              | 
+(4 rows)
 
 -- TODO: Should not create statistics bacause of duplicates
 SELECT pg_index_stats_build('ist_idx0', 'mcv');
  pg_index_stats_build 
 ----------------------
- t
+ f
+(1 row)
+
+SELECT pg_index_stats_build('ist_idx_1', 'mcv'); -- reject, already have same MCV
+ pg_index_stats_build 
+----------------------
+ f
 (1 row)
 
 \dX
@@ -66,9 +81,9 @@ SELECT pg_index_stats_build('ist_idx0', 'mcv');
  Schema |           Name            |         Definition          | Ndistinct | Dependencies |   MCV   
 --------+---------------------------+-----------------------------+-----------+--------------+---------
  public | is_test_x1_x2_x3_x4_stat  | x1, x2, x3, x4 FROM is_test | defined   |              | defined
- public | is_test_x1_x2_x3_x4_stat1 | x1, x2, x3, x4 FROM is_test | defined   |              | defined
- public | is_test_x1_x2_x3_x4_stat2 | x1, x2, x3, x4 FROM is_test |           |              | defined
- public | is_test_x2_x1_x3_x4_stat  | x1, x2, x3, x4 FROM is_test | defined   |              | defined
+ public | is_test_x1_x2_x3_x4_stat1 | x1, x2, x3, x4 FROM is_test | defined   |              | 
+ public | is_test_x2_expr_stat      | x2, (x3 * x3) FROM is_test  | defined   |              | defined
+ public | is_test_x2_x1_x3_x4_stat  | x1, x2, x3, x4 FROM is_test | defined   |              | 
 (4 rows)
 
 DROP TABLE is_test CASCADE;

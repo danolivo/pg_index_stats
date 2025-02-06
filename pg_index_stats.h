@@ -15,6 +15,8 @@
 #define STAT_MCV			(1<<1)
 #define STAT_DEPENDENCIES	(1<<2)
 
+extern MemoryContext mem_ctx;
+
 extern Bitmapset *check_duplicated(List *statList, int32 stat_types);
 
 #endif							/* PG_INDEX_STATS_H */

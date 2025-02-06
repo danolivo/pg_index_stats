@@ -9,11 +9,13 @@ INSERT INTO is_test (x1,x2,x3,x4)
 VACUUM ANALYZE is_test;
 
 CREATE INDEX ist_idx0 on is_test (x1,x2,x3,x4);
+CREATE INDEX ist_idx_1 on is_test (x2, (x3*x3));
 SHOW pg_index_stats.stattypes; --incorrect value still exists
 CREATE EXTENSION pg_index_stats;
 SHOW pg_index_stats.stattypes; -- should be default value
 -- Generate statistics on already existed indexes. Mind default values.
 SELECT pg_index_stats_build('ist_idx0');
+SELECT pg_index_stats_build('ist_idx_1', 'mcv, dependencies');
 
 CREATE INDEX ist_idx1 on is_test (x1,x2,x3,x4);
 CREATE INDEX ist_idx2 on is_test (x2,x1,x3,x4);
@@ -23,6 +25,7 @@ SELECT pg_index_stats_rebuild(); -- must not have more duplicated stats
 
 -- TODO: Should not create statistics bacause of duplicates
 SELECT pg_index_stats_build('ist_idx0', 'mcv');
+SELECT pg_index_stats_build('ist_idx_1', 'mcv'); -- reject, already have same MCV
 \dX
 
 DROP TABLE is_test CASCADE;

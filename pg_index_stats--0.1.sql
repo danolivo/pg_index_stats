@@ -43,6 +43,9 @@ $$ LANGUAGE SQL PARALLEL SAFE STRICT;
 -- Uses current value of the stattypes GUC to iidentify statistics needed.
 -- Return number of rebuilt statistics
 --
+-- XXX: we need to rename it or build statistics based on definition, already
+-- existing in the database
+--
 CREATE FUNCTION pg_index_stats_rebuild() RETURNS integer AS $$
 DECLARE
  result integer;
