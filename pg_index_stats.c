@@ -40,7 +40,7 @@ PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pg_index_stats_build);
 
-#define DEFAULT_STATTYPES STAT_MCV_NAME","STAT_NDISTINCT_NAME
+#define DEFAULT_STATTYPES STAT_MCV_NAME", "STAT_NDISTINCT_NAME
 
 static char *stattypes = DEFAULT_STATTYPES;
 static int extstat_columns_limit = 5; /* Don't allow to be too expensive */
@@ -231,19 +231,21 @@ pg_index_stats_build(PG_FUNCTION_ARGS)
 {
 	text	   *relname = PG_GETARG_TEXT_PP(0);
 	char	   *stats_list = text_to_cstring(PG_GETARG_TEXT_PP(1));
-	const char *tmp_stats_list = GetConfigOption(MODULE_NAME".stattypes", false, true);
+	char *tmp_stats_list;
 	RangeVar   *relvar;
 	Relation	rel;
 	bool		result;
-
-	/* Check correctness of the stats string */
-	(void) get_statistic_types();
 
 	if (extstat_columns_limit <= 0)
 	{
 		elog(WARNING, "Nothing to create because columns limit is too small");
 		PG_RETURN_BOOL(false);
 	}
+
+	tmp_stats_list = pstrdup(GetConfigOption(MODULE_NAME".stattypes", false, true));
+
+	/* Check correctness of the stats string */
+	(void) get_statistic_types();
 
 	SetConfigOption(MODULE_NAME".stattypes", stats_list, PGC_SUSET, PGC_S_SESSION);
 
@@ -263,6 +265,7 @@ pg_index_stats_build(PG_FUNCTION_ARGS)
 
 	/* XXX: In case of an ERROR it will be restored at the end of the function? */
 	SetConfigOption(MODULE_NAME".stattypes", tmp_stats_list, PGC_SUSET, PGC_S_SESSION);
+	pfree(tmp_stats_list);
 	PG_RETURN_BOOL(result);
 }
 

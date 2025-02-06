@@ -2,7 +2,7 @@ CREATE EXTENSION pg_index_stats;
 SHOW pg_index_stats.stattypes;
  pg_index_stats.stattypes 
 --------------------------
- mcv,ndistinct
+ mcv, ndistinct
 (1 row)
 
 SET pg_index_stats.columns_limit = 0;

@@ -39,7 +39,8 @@ deldeps AS (
 $$ LANGUAGE SQL PARALLEL SAFE STRICT;
 
 --
--- Generate extended statistics on all non-system indexes
+-- Generate extended statistics on all non-system indexes.
+-- Uses current value of the stattypes GUC to iidentify statistics needed.
 -- Return number of rebuilt statistics
 --
 CREATE FUNCTION pg_index_stats_rebuild() RETURNS integer AS $$
