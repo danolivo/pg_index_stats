@@ -101,7 +101,7 @@ jobs:
 
     - name: Archive artifacts
       if: ${{ failure() }}
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: make_check_logs
         path: |
