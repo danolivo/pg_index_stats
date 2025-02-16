@@ -135,6 +135,112 @@ fetch_statentries_for_relation(Relation pg_statext, Oid relid)
 	return result;
 }
 
+typedef struct
+{
+	StatExtEntry *entry;
+
+	Bitmapset *common_attrs;
+	Bitmapset *existed_attrs;
+	Bitmapset *new_attrs;
+
+	List	   *common_exprs;
+	List	   *existed_exprs;
+	List	   *new_exprs;
+} StatListCmp;
+
+#define DUPDEF_STAT(cmps) ( \
+	cmps->existed_exprs == NIL && cmps->new_exprs == NIL && \
+	bms_num_members(cmps->existed_attrs) == 0 && \
+	bms_num_members(cmps->new_attrs) == 0  && \
+	bms_num_members(cmps->common_attrs) + list_length(cmps->common_exprs) > 0 \
+)
+
+static List *
+_probe_statistics(const List *statslist, const List *exprs,
+				  const Bitmapset *attrs_used)
+{
+	ListCell   *lc;
+	List	   *tmp_exprs = list_copy(exprs);
+	List	   *result = NIL;
+	List	   *tmp_exprs2;
+
+	/*
+	 * Remove Vars from the list. We need only exprs there.
+	 */
+	foreach(lc, tmp_exprs)
+	{
+		StatsElem  *selem = (StatsElem *) lfirst(lc);
+
+		if (selem->expr == NULL)
+			tmp_exprs = foreach_delete_current(tmp_exprs, lc);
+	}
+
+	Assert(list_length(exprs) ==
+			list_length(tmp_exprs) + bms_num_members(attrs_used));
+
+	tmp_exprs2 = tmp_exprs;
+	foreach(lc, statslist)
+	{
+		StatExtEntry   *stat = (StatExtEntry *) lfirst(lc);
+		StatListCmp	   *cmps = palloc0(sizeof(StatListCmp));
+		ListCell	   *lc1;
+
+		cmps->entry = stat;
+		cmps->common_attrs = bms_intersect(stat->columns, attrs_used);
+		cmps->existed_attrs = bms_del_members(bms_copy(stat->columns), attrs_used);
+		cmps->new_attrs = bms_del_members(bms_copy(attrs_used), stat->columns);
+
+		tmp_exprs = list_copy(tmp_exprs2);
+		foreach(lc1, stat->exprs)
+		{
+			Node		   *expr2 = (Node *) lfirst(lc1);
+			ListCell	   *lc2;
+
+			foreach(lc2, tmp_exprs)
+			{
+				StatsElem	   *selem = (StatsElem *) lfirst(lc2);
+
+				if (equal(selem->expr, expr2))
+				{
+					/* Match is found. Add it into the list and go out */
+					cmps->common_exprs = lappend(cmps->common_exprs, expr2);
+					tmp_exprs = foreach_delete_current(tmp_exprs, lc2);
+					break;
+				}
+			}
+
+			if (lc2 == NULL)
+			{
+				/*
+				 * Unsuccessful comparison: existing stat contains expression
+				 * which is not in the incoming expression list
+				 */
+				cmps->existed_exprs = lappend(cmps->existed_exprs, expr2);
+				break;
+			}
+		}
+
+		/* Save remaining expressions from the incoming definition as 'new' */
+		foreach(lc1, tmp_exprs)
+		{
+			StatsElem	   *selem = (StatsElem *) lfirst(lc1);
+
+			cmps->new_exprs = lappend(cmps->new_exprs, selem->expr);
+			tmp_exprs = foreach_delete_current(tmp_exprs, lc1);
+		}
+
+		Assert(tmp_exprs == NIL);
+		Assert(list_length(cmps->new_exprs) + list_length(cmps->common_exprs) ==
+							list_length(exprs) - bms_num_members(attrs_used));
+		Assert(list_length(cmps->existed_exprs) +
+					list_length(cmps->common_exprs) == list_length(stat->exprs));
+
+		result = lappend(result, cmps);
+	}
+
+	return result;
+}
+
 static bool
 has_same_mcv(const List *statslist, const List *exprs,
 			 const Bitmapset *atts_used)
@@ -205,9 +311,11 @@ int
 reduce_duplicated_stat(const List *exprs, Bitmapset *atts_used,
 					   Relation hrel, int32 stat_types)
 {
-	Relation	pg_stext;
-	List	   *statslist;
-	MemoryContext oldctx;
+	Relation		pg_stext;
+	List		   *statslist;
+	MemoryContext	oldctx;
+	List		   *cmpsList;
+	ListCell	   *lc;
 
 	oldctx = MemoryContextSwitchTo(mem_ctx);
 
@@ -222,23 +330,29 @@ reduce_duplicated_stat(const List *exprs, Bitmapset *atts_used,
 		return stat_types;
 	}
 
-	/*
-	 * Most simple decision: we have to left it in the definition if no exact
-	 * duplicate exists in the stat list.
-	 */
-	if (stat_types & STAT_MCV && has_same_mcv(statslist, exprs, atts_used))
+	cmpsList = _probe_statistics(statslist, exprs, atts_used);
+	foreach(lc, cmpsList)
 	{
-		stat_types &= ~STAT_MCV;
-	}
+		StatListCmp	   *cmps = (StatListCmp *) lfirst(lc);
 
-	if (stat_types & STAT_NDISTINCT)
-	{
-		/* TODO */
-	}
+		if (DUPDEF_STAT(cmps))
+		{
+			/*
+			 * The most simple decision: if we already have a statistics with
+			 * the same definition, we don't need new statistics unless existed
+			 * one doesn't contain statistic of specific type.
+			 */
+			if (cmps->entry->types & STAT_MCV)
+				stat_types &= ~STAT_MCV;
+			if (cmps->entry->types & STAT_NDISTINCT)
+				stat_types &= ~STAT_NDISTINCT;
+			if (cmps->entry->types & STAT_DEPENDENCIES)
+				stat_types &= ~STAT_DEPENDENCIES;
+		}
 
-	if (stat_types & STAT_DEPENDENCIES)
-	{
-		/* TODO */
+		/* TODO: covering statistic */
+
+		/* TODO: change old statistic if a new one covers this old one */
 	}
 
 	table_close(pg_stext, RowExclusiveLock);
