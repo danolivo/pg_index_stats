@@ -80,5 +80,42 @@ SELECT pg_index_stats_build('ist_idx_1', 'mcv'); -- reject, already have same MC
  public | is_test_x2_expr_stat     | x2, (x3 * x3) FROM is_test  | defined   |              | defined
 (2 rows)
 
+-- Test covering statistics
+SET pg_index_stats.columns_limit = 3;
+SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
+ pg_index_stats_build 
+----------------------
+ t
+(1 row)
+
+-- Create one new statistic (MCV, dependencies)
+\dX
+                                     List of extended statistics
+ Schema |           Name           |         Definition          | Ndistinct | Dependencies |   MCV   
+--------+--------------------------+-----------------------------+-----------+--------------+---------
+ public | is_test_x1_x2_x3_stat    | x1, x2, x3 FROM is_test     |           | defined      | defined
+ public | is_test_x1_x2_x3_x4_stat | x1, x2, x3, x4 FROM is_test | defined   |              | defined
+ public | is_test_x2_expr_stat     | x2, (x3 * x3) FROM is_test  | defined   |              | defined
+(3 rows)
+
+SET pg_index_stats.columns_limit = 2;
+SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
+ pg_index_stats_build 
+----------------------
+ t
+(1 row)
+
+-- Create one new statistic with a MCV only
+\dX
+                                     List of extended statistics
+ Schema |           Name           |         Definition          | Ndistinct | Dependencies |   MCV   
+--------+--------------------------+-----------------------------+-----------+--------------+---------
+ public | is_test_x1_x2_stat       | x1, x2 FROM is_test         |           |              | defined
+ public | is_test_x1_x2_x3_stat    | x1, x2, x3 FROM is_test     |           | defined      | defined
+ public | is_test_x1_x2_x3_x4_stat | x1, x2, x3, x4 FROM is_test | defined   |              | defined
+ public | is_test_x2_expr_stat     | x2, (x3 * x3) FROM is_test  | defined   |              | defined
+(4 rows)
+
+RESET pg_index_stats.columns_limit;
 DROP TABLE is_test CASCADE;
 DROP EXTENSION pg_index_stats;

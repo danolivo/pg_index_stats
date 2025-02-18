@@ -155,6 +155,10 @@ typedef struct
 	bms_num_members(cmps->common_attrs) + list_length(cmps->common_exprs) > 0 \
 )
 
+#define COVERINGDEF_STAT(cmps) ( \
+	cmps->new_exprs == NIL && bms_num_members(cmps->new_attrs) == 0 \
+)
+
 static List *
 _probe_statistics(const List *statslist, const List *exprs,
 				  const Bitmapset *attrs_used)
@@ -241,69 +245,6 @@ _probe_statistics(const List *statslist, const List *exprs,
 	return result;
 }
 
-static bool
-has_same_mcv(const List *statslist, const List *exprs,
-			 const Bitmapset *atts_used)
-{
-	ListCell   *lc;
-	List	   *tmp_exprs = list_copy(exprs);
-
-	foreach(lc, tmp_exprs)
-	{
-		StatsElem  *selem = (StatsElem *) lfirst(lc);
-
-		if (selem->expr == NULL)
-			tmp_exprs = foreach_delete_current(tmp_exprs, lc);
-	}
-
-	/*
-	 * Look for the first index with the same definition containing MCV stat.
-	 */
-	foreach(lc, statslist)
-	{
-		StatExtEntry *stat = (StatExtEntry *) lfirst(lc);
-
-		/*  */
-		if (bms_equal(stat->columns, atts_used))
-		{
-			ListCell   *lc1;
-
-			/* exprs doesn't contain duplicates already */
-			foreach(lc1, tmp_exprs)
-			{
-				StatsElem	   *selem = (StatsElem *) lfirst(lc1);
-				ListCell	   *lc2;
-
-				foreach(lc2, stat->exprs)
-				{
-					Node *expr2 = (Node *) lfirst(lc2);
-
-					if (equal(selem->expr, expr2))
-					{
-						break;
-					}
-				}
-
-				if (lc2 == NULL)
-				{
-					/* Unsuccessful comparison, break */
-					break;
-				}
-			}
-
-			if (lc1 != NULL)
-				/* Unsuccessful comparison, go to the next stat slot */
-				continue;
-
-			/* Duplicated stat found. Just check the internals */
-			if (stat->types & STAT_MCV)
-				return true;
-		}
-	}
-
-	return false;
-}
-
 /*
  * Decide on types of extended statistics that should stay in the definition.
  */
@@ -350,9 +291,17 @@ reduce_duplicated_stat(const List *exprs, Bitmapset *atts_used,
 				stat_types &= ~STAT_DEPENDENCIES;
 		}
 
-		/* TODO: covering statistic */
+		if (COVERINGDEF_STAT(cmps))
+		{
+			if (cmps->entry->types & STAT_NDISTINCT)
+				stat_types &= ~STAT_NDISTINCT;
+			if (cmps->entry->types & STAT_DEPENDENCIES)
+				stat_types &= ~STAT_DEPENDENCIES;
+		}
 
 		/* TODO: change old statistic if a new one covers this old one */
+
+		/* XXX: What if we have intersecting statistics ? */
 	}
 
 	table_close(pg_stext, RowExclusiveLock);

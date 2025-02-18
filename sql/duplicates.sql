@@ -28,6 +28,17 @@ SELECT pg_index_stats_build('ist_idx0', 'mcv');
 SELECT pg_index_stats_build('ist_idx_1', 'mcv'); -- reject, already have same MCV
 \dX
 
+-- Test covering statistics
+SET pg_index_stats.columns_limit = 3;
+SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
+-- Create one new statistic (MCV, dependencies)
+\dX
+SET pg_index_stats.columns_limit = 2;
+SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
+-- Create one new statistic with a MCV only
+\dX
+
+RESET pg_index_stats.columns_limit;
 DROP TABLE is_test CASCADE;
 DROP EXTENSION pg_index_stats;
 
