@@ -46,6 +46,7 @@ PG_FUNCTION_INFO_V1(pg_index_stats_build);
 
 static char *stattypes = DEFAULT_STATTYPES;
 static int extstat_columns_limit = 5; /* Don't allow to be too expensive */
+static bool combine_stats = true;
 
 /* Local Memory Context to avoid multiple free commands */
 MemoryContext mem_ctx = NULL;
@@ -368,7 +369,8 @@ pg_index_stats_build_int(Relation rel)
 		 * statistics on the same relation and correct our definition to reduce
 		 * duplicated data as much as possible.
 		 */
-		stat_types = reduce_duplicated_stat(exprlst, atts_used, hrel, stat_types);
+		if (combine_stats)
+			stat_types = reduce_duplicated_stat(exprlst, atts_used, hrel, stat_types);
 		if (stat_types == 0)
 			/* Reduced to nothing */
 			goto cleanup;
@@ -553,6 +555,18 @@ _PG_init(void)
 							NULL,
 							NULL,
 							NULL);
+
+	DefineCustomBoolVariable(MODULE_NAME".compactify",
+								"Reduce redundancy of extended statistics",
+								"Before creation of new statistic remove all already existed stat types from the definition",
+								&combine_stats,
+								true,
+								PGC_USERSET,
+								0,
+								NULL,
+								NULL,
+								NULL
+	   );
 
 	next_object_access_hook = object_access_hook;
 	object_access_hook = extstat_remember_index_hook;

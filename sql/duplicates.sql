@@ -38,6 +38,12 @@ SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
 -- Create one new statistic with a MCV only
 \dX
 
+-- Check compactifying feature
+SET pg_index_stats.compactify = 'off';
+SELECT pg_index_stats_rebuild(); -- must create duplicated stats
+\dX
+
+RESET pg_index_stats.compactify;
 RESET pg_index_stats.columns_limit;
 DROP TABLE is_test CASCADE;
 DROP EXTENSION pg_index_stats;

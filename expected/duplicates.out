@@ -116,6 +116,25 @@ SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
  public | is_test_x2_expr_stat     | x2, (x3 * x3) FROM is_test  | defined   |              | defined
 (4 rows)
 
+-- Check compactifying feature
+SET pg_index_stats.compactify = 'off';
+SELECT pg_index_stats_rebuild(); -- must create duplicated stats
+ pg_index_stats_rebuild 
+------------------------
+                      4
+(1 row)
+
+\dX
+                                   List of extended statistics
+ Schema |         Name         |         Definition         | Ndistinct | Dependencies |   MCV   
+--------+----------------------+----------------------------+-----------+--------------+---------
+ public | is_test_x1_x2_stat   | x1, x2 FROM is_test        | defined   |              | defined
+ public | is_test_x1_x2_stat1  | x1, x2 FROM is_test        | defined   |              | defined
+ public | is_test_x2_expr_stat | x2, (x3 * x3) FROM is_test | defined   |              | defined
+ public | is_test_x2_x1_stat   | x1, x2 FROM is_test        | defined   |              | defined
+(4 rows)
+
+RESET pg_index_stats.compactify;
 RESET pg_index_stats.columns_limit;
 DROP TABLE is_test CASCADE;
 DROP EXTENSION pg_index_stats;
