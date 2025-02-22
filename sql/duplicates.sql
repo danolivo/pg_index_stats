@@ -38,8 +38,20 @@ SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
 -- Create one new statistic with a MCV only
 \dX
 
+-- New stat covers old one
+SELECT pg_index_stats_remove();
+SET pg_index_stats.columns_limit = 2;
+SELECT pg_index_stats_build('ist_idx0', 'ndistinct, dependencies');
+SELECT pg_index_stats_build('ist_idx0', 'mcv');
+\dX
+SET pg_index_stats.columns_limit = 3;
+SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
+-- Create one new statistic with all the types and remove an old one
+\dX
+
 -- Check compactifying feature
 SET pg_index_stats.compactify = 'off';
+SET pg_index_stats.columns_limit = 2; -- Just do it quickly
 SELECT pg_index_stats_rebuild(); -- must create duplicated stats
 \dX
 

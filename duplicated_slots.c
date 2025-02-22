@@ -21,6 +21,8 @@
 #include "access/genam.h"
 #include "access/htup_details.h"
 #include "access/table.h"
+#include "access/xact.h" /* CommandCounterIncrement */
+#include "catalog/dependency.h" /* performDeletion */
 #include "catalog/pg_statistic_ext.h"
 #include "catalog/pg_statistic_ext_data.h"
 #include "nodes/nodeFuncs.h"
@@ -33,8 +35,12 @@
 #include "duplicated_slots.h"
 #include "pg_index_stats.h"
 
+/*
+ * XXX: think about owners and acess rules ...
+*/
 typedef struct StatExtEntry
 {
+	Oid			oid;
 	char	   *name;
 	Bitmapset  *columns;
 	int			types;
@@ -78,6 +84,7 @@ fetch_statentries_for_relation(Relation pg_statext, Oid relid)
 
 		entry = palloc0(sizeof(StatExtEntry));
 		staForm = (Form_pg_statistic_ext) GETSTRUCT(htup);
+		entry->oid = staForm->oid; /* Need to delete/update it further */
 		entry->name = pstrdup(NameStr(staForm->stxname));
 		for (i = 0; i < staForm->stxkeys.dim1; i++)
 		{
@@ -148,6 +155,10 @@ typedef struct
 	List	   *new_exprs;
 } StatListCmp;
 
+/*
+ * One of existing stats have strictly the same definition as proposed one.
+ * XXX: stxstattarget?
+ */
 #define DUPDEF_STAT(cmps) ( \
 	cmps->existed_exprs == NIL && cmps->new_exprs == NIL && \
 	bms_num_members(cmps->existed_attrs) == 0 && \
@@ -155,8 +166,15 @@ typedef struct
 	bms_num_members(cmps->common_attrs) + list_length(cmps->common_exprs) > 0 \
 )
 
-#define COVERINGDEF_STAT(cmps) ( \
+/* One of existing stats covers all the columns of the proposed one */
+#define COVEREDDEF_STAT(cmps) ( \
 	cmps->new_exprs == NIL && bms_num_members(cmps->new_attrs) == 0 \
+)
+
+/* Exisitng stat is covered by the proposed one */
+#define COVERINGDEF_STAT(cmps) ( \
+	(cmps->new_exprs != NIL || bms_num_members(cmps->new_attrs) != 0) && \
+	cmps->existed_exprs == NIL && bms_num_members(cmps->existed_attrs) == 0 \
 )
 
 static List *
@@ -247,6 +265,9 @@ _probe_statistics(const List *statslist, const List *exprs,
 
 /*
  * Decide on types of extended statistics that should stay in the definition.
+ *
+ * XXX: what about stxstattarget? We don't think about it now, but it may
+ * make sense in the future ...
  */
 int
 reduce_duplicated_stat(const List *exprs, Bitmapset *atts_used,
@@ -291,15 +312,51 @@ reduce_duplicated_stat(const List *exprs, Bitmapset *atts_used,
 				stat_types &= ~STAT_DEPENDENCIES;
 		}
 
-		if (COVERINGDEF_STAT(cmps))
+		if (COVEREDDEF_STAT(cmps))
 		{
+			/*
+			 * New statistic definition doesn't provide new data, only
+			 * duplicating stats. We have to exclude such unnecessary stuff.
+			 */
 			if (cmps->entry->types & STAT_NDISTINCT)
 				stat_types &= ~STAT_NDISTINCT;
 			if (cmps->entry->types & STAT_DEPENDENCIES)
 				stat_types &= ~STAT_DEPENDENCIES;
 		}
 
+		if (COVERINGDEF_STAT(cmps))
+		{
+			int useful_stattypes = cmps->entry->types;
+
+			/*
+			 * New definition covers one of existing statistics. Probe,
+			 * if something useful still exists there.
+			 */
+
+			if (stat_types & STAT_NDISTINCT)
+				useful_stattypes &= ~STAT_NDISTINCT;
+			if (stat_types & STAT_DEPENDENCIES)
+				useful_stattypes &= ~STAT_DEPENDENCIES;
+
+			if (useful_stattypes == 0)
+			{
+				ObjectAddress object;
+
+				/*
+				 * Quite rare case because of MCV is highly probably has been
+				 * created. But it simply to implement.
+				 */
+				 object.classId = StatisticExtRelationId;
+				 object.objectId = cmps->entry->oid;
+				 object.objectSubId = 0;
+
+				 performDeletion(&object, DROP_CASCADE, PERFORM_DELETION_INTERNAL);
+				CommandCounterIncrement();
+			}
+		}
+
 		/* TODO: change old statistic if a new one covers this old one */
+		// AlterStatistics AlterStatsStmt EventTriggerCollectSimpleCommand
 
 		/* XXX: What if we have intersecting statistics ? */
 	}
