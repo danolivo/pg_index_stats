@@ -23,6 +23,8 @@
 #include "access/table.h"
 #include "access/xact.h" /* CommandCounterIncrement */
 #include "catalog/dependency.h" /* performDeletion */
+#include "catalog/indexing.h" /* CatalogTupleUpdate */
+#include "catalog/objectaccess.h" /* InvokeObjectPostAlterHook */
 #include "catalog/pg_statistic_ext.h"
 #include "catalog/pg_statistic_ext_data.h"
 #include "nodes/nodeFuncs.h"
@@ -351,6 +353,62 @@ reduce_duplicated_stat(const List *exprs, Bitmapset *atts_used,
 				 object.objectSubId = 0;
 
 				 performDeletion(&object, DROP_CASCADE, PERFORM_DELETION_INTERNAL);
+				CommandCounterIncrement();
+			}
+			else if (useful_stattypes != cmps->entry->types)
+			{
+				HeapTuple	oldtup;
+				HeapTuple	newtup;
+				Datum		repl_val[Natts_pg_statistic_ext];
+				bool		repl_null[Natts_pg_statistic_ext];
+				bool		repl_repl[Natts_pg_statistic_ext];
+				Oid			stxoid = cmps->entry->oid;
+				Datum		types[4];		/* one for each possible type of statistic */
+				int			ntypes;
+				ArrayType  *stxkind;
+
+				/*
+				 * Some types must be removed from the existing statistic.
+				 * Alter this statistic. There are only set of stat types may
+				 * be altered for now.
+				 */
+
+				oldtup = SearchSysCache1(STATEXTOID, ObjectIdGetDatum(stxoid));
+				if (!HeapTupleIsValid(oldtup))
+					elog(ERROR, "cache lookup failed for extended statistics object %u", stxoid);
+
+				ntypes = 0;
+
+				if (useful_stattypes & STAT_NDISTINCT)
+					types[ntypes++] = CharGetDatum(STATS_EXT_NDISTINCT);
+				if (useful_stattypes & STAT_DEPENDENCIES)
+					types[ntypes++] = CharGetDatum(STATS_EXT_DEPENDENCIES);
+				if (useful_stattypes & STAT_MCV)
+					types[ntypes++] = CharGetDatum(STATS_EXT_MCV);
+
+				Assert(ntypes > 0 && ntypes <= lengthof(types));
+				stxkind = construct_array(types, ntypes, CHAROID, 1, true, TYPALIGN_CHAR);
+
+				memset(repl_val, 0, sizeof(repl_val));
+				memset(repl_null, false, sizeof(repl_null));
+				memset(repl_repl, false, sizeof(repl_repl));
+				repl_repl[Anum_pg_statistic_ext_stxkind - 1] = true;
+				repl_val[Anum_pg_statistic_ext_stxkind - 1] = PointerGetDatum(stxkind);
+
+				newtup = heap_modify_tuple(oldtup, RelationGetDescr(pg_stext),
+												repl_val, repl_null, repl_repl);
+
+				CatalogTupleUpdate(pg_stext, &newtup->t_self, newtup);
+				InvokeObjectPostAlterHook(StatisticExtRelationId, stxoid, 0);
+
+				/*
+				 * NOTE: because we only support altering the statistics target, not the
+				 * other fields, there is no need to update dependencies.
+				 */
+
+				heap_freetuple(newtup);
+				ReleaseSysCache(oldtup);
+
 				CommandCounterIncrement();
 			}
 		}

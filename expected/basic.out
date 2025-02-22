@@ -120,11 +120,12 @@ SELECT pg_index_stats_build('abc_idx');
 (1 row)
 
 -- Must see one more statistic because of new limit (including x1)
+-- Also, redundant ndistinct statistic will be removed because of covering stat
 \dX
                                                List of extended statistics
  Schema |             Name             |                 Definition                  | Ndistinct | Dependencies |   MCV   
 --------+------------------------------+---------------------------------------------+-----------+--------------+---------
- public | abc_x2_x4_expr_x5_x3_stat    | x2, x3, x4, x5, (x1 * x1 / x4) FROM abc     | defined   | defined      | defined
+ public | abc_x2_x4_expr_x5_x3_stat    | x2, x3, x4, x5, (x1 * x1 / x4) FROM abc     |           | defined      | defined
  public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   |              | defined
 (2 rows)
 
@@ -170,7 +171,7 @@ SELECT pg_index_stats_build('abc_idx');
                                                List of extended statistics
  Schema |             Name             |                 Definition                  | Ndistinct | Dependencies |   MCV   
 --------+------------------------------+---------------------------------------------+-----------+--------------+---------
- public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   |              | defined
+ public | abc_x2_x4_expr_x5_x3_x1_stat | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc | defined   |              | 
  public | manually_built               | x1, x3, (x2 || '2.'::text) FROM abc         | defined   | defined      | defined
  public | manually_built_1             | x1, x2, x3, x4, x5, (x1 * x1 / x4) FROM abc |           |              | defined
 (3 rows)

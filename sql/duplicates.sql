@@ -49,6 +49,16 @@ SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
 -- Create one new statistic with all the types and remove an old one
 \dX
 
+-- Change existed stats on arrival of a covering one
+SELECT * FROM pg_index_stats_remove();
+SET pg_index_stats.columns_limit = 3;
+CREATE INDEX ist_idx3 on is_test (x3,x4);
+SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
+\dX
+SET pg_index_stats.columns_limit = 5;
+SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
+\dX
+
 -- Check compactifying feature
 SET pg_index_stats.compactify = 'off';
 SET pg_index_stats.columns_limit = 2; -- Just do it quickly

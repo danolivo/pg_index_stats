@@ -37,6 +37,7 @@ CREATE EXTENSION pg_index_stats;
 SET pg_index_stats.columns_limit = 8;
 SELECT pg_index_stats_build('abc_idx');
 -- Must see one more statistic because of new limit (including x1)
+-- Also, redundant ndistinct statistic will be removed because of covering stat
 \dX
 SELECT count(*) FROM pg_description
 WHERE description LIKE 'pg_index_stats%';

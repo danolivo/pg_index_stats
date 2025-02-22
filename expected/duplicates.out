@@ -160,13 +160,52 @@ SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
  public | is_test_x1_x2_x3_stat | x1, x2, x3 FROM is_test | defined   | defined      | defined
 (2 rows)
 
+-- Change existed stats on arrival of a covering one
+SELECT * FROM pg_index_stats_remove();
+ pg_index_stats_remove 
+-----------------------
+                     2
+(1 row)
+
+SET pg_index_stats.columns_limit = 3;
+CREATE INDEX ist_idx3 on is_test (x3,x4);
+SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
+ pg_index_stats_build 
+----------------------
+ t
+(1 row)
+
+\dX
+                                  List of extended statistics
+ Schema |         Name          |       Definition        | Ndistinct | Dependencies |   MCV   
+--------+-----------------------+-------------------------+-----------+--------------+---------
+ public | is_test_x1_x2_x3_stat | x1, x2, x3 FROM is_test | defined   | defined      | defined
+ public | is_test_x3_x4_stat    | x3, x4 FROM is_test     | defined   |              | defined
+(2 rows)
+
+SET pg_index_stats.columns_limit = 5;
+SELECT pg_index_stats_build('ist_idx0', 'mcv, ndistinct, dependencies');
+ pg_index_stats_build 
+----------------------
+ t
+(1 row)
+
+\dX
+                                     List of extended statistics
+ Schema |           Name           |         Definition          | Ndistinct | Dependencies |   MCV   
+--------+--------------------------+-----------------------------+-----------+--------------+---------
+ public | is_test_x1_x2_x3_stat    | x1, x2, x3 FROM is_test     |           |              | defined
+ public | is_test_x1_x2_x3_x4_stat | x1, x2, x3, x4 FROM is_test | defined   | defined      | defined
+ public | is_test_x3_x4_stat       | x3, x4 FROM is_test         |           |              | defined
+(3 rows)
+
 -- Check compactifying feature
 SET pg_index_stats.compactify = 'off';
 SET pg_index_stats.columns_limit = 2; -- Just do it quickly
 SELECT pg_index_stats_rebuild(); -- must create duplicated stats
  pg_index_stats_rebuild 
 ------------------------
-                      4
+                      5
 (1 row)
 
 \dX
@@ -177,7 +216,8 @@ SELECT pg_index_stats_rebuild(); -- must create duplicated stats
  public | is_test_x1_x2_stat1  | x1, x2 FROM is_test        | defined   |              | defined
  public | is_test_x2_expr_stat | x2, (x3 * x3) FROM is_test | defined   |              | defined
  public | is_test_x2_x1_stat   | x1, x2 FROM is_test        | defined   |              | defined
-(4 rows)
+ public | is_test_x3_x4_stat   | x3, x4 FROM is_test        | defined   |              | defined
+(5 rows)
 
 RESET pg_index_stats.compactify;
 RESET pg_index_stats.columns_limit;
