@@ -48,13 +48,15 @@ $$ LANGUAGE SQL PARALLEL SAFE STRICT;
 --
 CREATE FUNCTION pg_index_stats_rebuild() RETURNS integer AS $$
 DECLARE
- result integer;
+ result		integer;
+ stattypes	text;
 BEGIN
   -- Pre-cleanup
   PERFORM pg_index_stats_remove();
 
+  SELECT current_setting('pg_index_stats.stattypes') INTO stattypes;
   SELECT count(*) FROM (
-    SELECT pg_index_stats_build((c.oid::regclass)::text) AS value
+    SELECT pg_index_stats_build((c.oid::regclass)::text, stattypes) AS value
 	FROM pg_class c, pg_namespace n
     WHERE
       c.relkind = 'i' AND
