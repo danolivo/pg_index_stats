@@ -220,6 +220,17 @@ SELECT pg_index_stats_rebuild(); -- must create duplicated stats
 (5 rows)
 
 RESET pg_index_stats.compactify;
+DROP INDEX ist_idx3,ist_idx0,ist_idx1,ist_idx_1;
+CREATE INDEX idx4_exprs ON is_test((x1*x2), (x1+x2));
+CREATE INDEX idx4 ON is_test(x1, x2);
+\dX
+                                       List of extended statistics
+ Schema |          Name          |            Definition             | Ndistinct | Dependencies |   MCV   
+--------+------------------------+-----------------------------------+-----------+--------------+---------
+ public | is_test_expr_expr_stat | (x1 * x2), (x1 + x2) FROM is_test | defined   |              | defined
+ public | is_test_x2_x1_stat     | x1, x2 FROM is_test               | defined   |              | defined
+(2 rows)
+
 RESET pg_index_stats.columns_limit;
 DROP TABLE is_test CASCADE;
 DROP EXTENSION pg_index_stats;

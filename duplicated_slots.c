@@ -240,7 +240,6 @@ _probe_statistics(const List *statslist, const List *exprs,
 				 * which is not in the incoming expression list
 				 */
 				cmps->existed_exprs = lappend(cmps->existed_exprs, expr2);
-				break;
 			}
 		}
 

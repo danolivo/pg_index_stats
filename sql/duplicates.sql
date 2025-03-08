@@ -64,8 +64,13 @@ SET pg_index_stats.compactify = 'off';
 SET pg_index_stats.columns_limit = 2; -- Just do it quickly
 SELECT pg_index_stats_rebuild(); -- must create duplicated stats
 \dX
-
 RESET pg_index_stats.compactify;
+
+DROP INDEX ist_idx3,ist_idx0,ist_idx1,ist_idx_1;
+CREATE INDEX idx4_exprs ON is_test((x1*x2), (x1+x2));
+CREATE INDEX idx4 ON is_test(x1, x2);
+\dX
+
 RESET pg_index_stats.columns_limit;
 DROP TABLE is_test CASCADE;
 DROP EXTENSION pg_index_stats;
