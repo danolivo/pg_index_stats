@@ -41,6 +41,7 @@
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pg_index_stats_build);
+PG_FUNCTION_INFO_V1(pg_index_stats_probe);
 
 #define DEFAULT_STATTYPES STAT_MCV_NAME", "STAT_NDISTINCT_NAME
 
@@ -199,7 +200,7 @@ _create_statistics(CreateStatsStmt *stmt, Oid indexId)
 }
 
 /*
- * generateClonedExtStatsStmt
+ * pg_index_stats_build
  */
 Datum
 pg_index_stats_build(PG_FUNCTION_ARGS)
@@ -584,3 +585,44 @@ _PG_init(void)
 	MarkGUCPrefixReserved(MODULE_NAME);
 #endif
 }
+
+/*
+ *
+ */
+ Datum
+ pg_index_stats_probe(PG_FUNCTION_ARGS)
+ {
+	int		num = PG_GETARG_INT32(0);
+	char   *querystring;
+
+	if (num < 0)
+	{
+		ereport(ERROR,
+			(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+			 errmsg("Number of candidate queries is outside the valid range (>= 0)")));
+	}
+
+	if (get_extension_oid("pg_stat_statements", true) == InvalidOid)
+	{
+		PG_RETURN_BOOL(false);
+	}
+
+	/*
+	 * Statistic extension exists. Probe its database to identify variants
+	 */
+
+	querystring = psprintf("SELECT queryid FROM (SELECT queryid,"
+  							"shared_blks_hit+shared_blks_read+local_blks_hit+local_blks_read+temp_blks_read AS blocks"
+ 							"FROM pg_stat_statements ORDER BY blocks DESC) LIMIT %d;", num);
+
+	PG_TRY();
+	{
+
+	}
+	PG_FINALLY();
+	{
+	}
+	PG_END_TRY();
+
+	PG_RETURN_BOOL(true);
+ }
