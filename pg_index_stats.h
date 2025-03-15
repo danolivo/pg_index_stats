@@ -19,4 +19,7 @@ extern MemoryContext mem_ctx;
 
 extern Bitmapset *check_duplicated(List *statList, int32 stat_types);
 
+/* --- Query-driven extended statistics: interface ---*/
+extern bool QDS_Init(void);
+
 #endif							/* PG_INDEX_STATS_H */

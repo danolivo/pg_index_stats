@@ -1,5 +1,5 @@
 # pg_index_stats extension
-comment = 'Generate extended statistics on a set of index columns'
+comment = 'Generate extended statistics using empirical rules'
 module_pathname = '$libdir/pg_index_stats'
 relocatable = true
-default_version = '0.1'
+default_version = '0.3'

@@ -41,6 +41,7 @@
 PG_MODULE_MAGIC;
 
 PG_FUNCTION_INFO_V1(pg_index_stats_build);
+PG_FUNCTION_INFO_V1(pg_index_stats_probe);
 
 #define DEFAULT_STATTYPES STAT_MCV_NAME", "STAT_NDISTINCT_NAME
 
@@ -199,7 +200,7 @@ _create_statistics(CreateStatsStmt *stmt, Oid indexId)
 }
 
 /*
- * generateClonedExtStatsStmt
+ * pg_index_stats_build
  */
 Datum
 pg_index_stats_build(PG_FUNCTION_ARGS)
@@ -575,12 +576,89 @@ _PG_init(void)
 	ProcessUtility_hook = after_utility_extstat_creation;
 
 	mem_ctx = AllocSetContextCreate(TopMemoryContext,
-											 MODULE_NAME" - local memory context",
-											 ALLOCSET_DEFAULT_SIZES);
+									MODULE_NAME" - local memory context",
+									ALLOCSET_DEFAULT_SIZES);
 
 #if PG_VERSION_NUM < 150000
 	EmitWarningsOnPlaceholders(MODULE_NAME);
 #else
 	MarkGUCPrefixReserved(MODULE_NAME);
 #endif
+
+#if PG_VERSION_NUM >= 170000
+	QDS_Init();
+#endif
 }
+
+#include "executor/spi.h"
+
+/*
+ *
+ */
+ Datum
+ pg_index_stats_probe(PG_FUNCTION_ARGS)
+ {
+	int			num = PG_GETARG_INT32(0);
+	char 	  *querystring;
+	int			ret;
+	uint64		proc;
+	int			i;
+
+#if PG_VERSION_NUM < 170000
+	PG_RETURN_BOOL(false);
+#endif
+
+	if (num < 0)
+	{
+		ereport(ERROR,
+			(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+			 errmsg("Number of candidate queries is outside the valid range (>= 0)")));
+	}
+
+	if (get_extension_oid("pg_stat_statements", true) == InvalidOid)
+	{
+		PG_RETURN_BOOL(false);
+	}
+
+	/*
+	 * Statistic extension exists. Probe its database to identify variants
+	 */
+
+	querystring = psprintf("SELECT queryid FROM (SELECT queryid,"
+  							"shared_blks_hit+shared_blks_read+local_blks_hit+local_blks_read+temp_blks_read AS blocks"
+ 							"FROM pg_stat_statements ORDER BY blocks DESC) LIMIT %d;", num);
+
+	SPI_connect();
+
+	PG_TRY();
+	{
+		ret = SPI_execute(querystring, true, 0);
+		proc = SPI_processed;
+	}
+	PG_FINALLY();
+	{
+	}
+	PG_END_TRY();
+
+	if (ret != SPI_OK_SELECT || proc == 0)
+	{
+		SPI_finish();
+		PG_RETURN_BOOL(false);
+	}
+
+	Assert(SPI_tuptable->tupdesc->natts == 1);
+
+	for (i = 0; i < proc; i++)
+	{
+		HeapTuple	spi_tuple;
+		char	   *rowid;
+		uint64		queryid;
+
+		spi_tuple = SPI_tuptable->vals[i];
+
+		rowid = SPI_getvalue(spi_tuple, SPI_tuptable->tupdesc, 1);
+		queryid = (uint64) strtol(rowid, NULL, 10);
+	}
+
+	PG_RETURN_BOOL(true);
+ }
