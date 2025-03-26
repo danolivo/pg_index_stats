@@ -21,6 +21,7 @@ jobs:
     - name: "Define PostreSQL major version"
       run: |
         echo "The action workflow is triggered by the $BRANCH_NAME"
+        sudo apt-get update
         sudo apt install libipc-run-perl libreadline-dev libxml2-utils xsltproc libxslt1-dev fop
         git config --global user.email "ci@danolivo.com"
         git config --global user.name "CI"
