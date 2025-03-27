@@ -25,6 +25,10 @@
 #include "catalog/pg_extension.h"
 #include "catalog/pg_statistic_ext.h"
 #include "commands/defrem.h"
+#if PG_VERSION_NUM >= 180000
+#include "commands/explain.h"
+#include "commands/explain_state.h"
+#endif
 #include "commands/extension.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -47,6 +51,18 @@ PG_FUNCTION_INFO_V1(pg_index_stats_build);
 static char *stattypes = DEFAULT_STATTYPES;
 static int extstat_columns_limit = 5; /* Don't allow to be too expensive */
 static bool combine_stats = true;
+
+/* Stuff for the explain extension */
+#if PG_VERSION_NUM >= 180000
+static int	es_extension_id = -1;
+static explain_per_plan_hook_type prev_explain_per_plan_hook = NULL;
+
+static void table_stat_handler(ExplainState *es, DefElem *opt, ParseState *pstate);
+static void table_stat_per_plan_hook(PlannedStmt *plannedstmt, IntoClause *into,
+									 ExplainState *es, const char *queryString,
+									 ParamListInfo params,
+									 QueryEnvironment *queryEnv);
+#endif
 
 /* Local Memory Context to avoid multiple free commands */
 MemoryContext mem_ctx = NULL;
@@ -583,4 +599,74 @@ _PG_init(void)
 #else
 	MarkGUCPrefixReserved(MODULE_NAME);
 #endif
+
+
+#if PG_VERSION_NUM >= 180000
+	RegisterExtensionExplainOption("stat", table_stat_handler);
+	es_extension_id = GetExplainExtensionId(MODULE_NAME);
+
+	prev_explain_per_plan_hook = explain_per_plan_hook;
+	explain_per_plan_hook = table_stat_per_plan_hook;
+#endif
 }
+
+
+/* *****************************************************************************
+ *
+ * EXPLAIN extension
+ *
+ **************************************************************************** */
+
+ #if PG_VERSION_NUM >= 180000
+
+ typedef struct table_stat_options
+ {
+	 bool showstat;
+ } table_stat_options;
+
+ static table_stat_options *
+ table_stat_ensure_options(ExplainState *es)
+ {
+	 table_stat_options *options;
+
+	 options = GetExplainExtensionState(es, es_extension_id);
+
+	 if (options == NULL)
+	 {
+		 options = palloc0(sizeof(table_stat_options));
+		 SetExplainExtensionState(es, es_extension_id, options);
+	 }
+
+	 return options;
+ }
+
+ static void
+ table_stat_handler(ExplainState *es, DefElem *opt, ParseState *pstate)
+ {
+	 table_stat_options *options = table_stat_ensure_options(es);
+
+	 options->showstat = defGetBoolean(opt);
+ }
+
+ static void
+ table_stat_per_plan_hook(PlannedStmt *plannedstmt,
+						  IntoClause *into,
+						  ExplainState *es,
+						  const char *queryString,
+						  ParamListInfo params,
+						  QueryEnvironment *queryEnv)
+ {
+	 table_stat_options *options;
+
+	 if (prev_explain_per_plan_hook)
+		 (*prev_explain_per_plan_hook) (plannedstmt, into, es, queryString,
+										params, queryEnv);
+
+	 options = GetExplainExtensionState(es, es_extension_id);
+	 if (options == NULL || !options->showstat)
+		 return;
+
+
+ }
+
+ #endif
