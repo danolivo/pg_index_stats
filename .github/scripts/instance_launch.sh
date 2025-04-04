@@ -27,10 +27,6 @@ then
   echo "compute_query_id = 'regress'" >> $M/postgresql.conf
 fi
 
-# Speed up the 'Join Order Benchmark' test
-echo "fsync = off" >> $M/postgresql.conf
-echo "autovacuum = 'off'" >> $M/postgresql.conf
-
 pg_ctl -w -D $M -l logfile.log start
 createdb $U
 
