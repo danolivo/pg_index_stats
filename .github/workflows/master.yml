@@ -120,3 +120,13 @@ jobs:
         psql -c "ALTER SYSTEM SET pg_index_stats.columns_limit = 0"
         psql -c "SELECT pg_reload_conf()"
         make installcheck
+
+    - name: Archive artifacts-2
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: make_check_logs
+        path: |
+          ${{ env.PG_DIR }}
+        retention-days: 7
+

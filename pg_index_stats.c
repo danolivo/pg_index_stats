@@ -42,7 +42,14 @@
 #include "pg_index_stats.h"
 #include "duplicated_slots.h"
 
+#if PG_VERSION_NUM >= 180000
+PG_MODULE_MAGIC_EXT(
+					.name = MODULE_NAME,
+					.version = "0.3.0"
+);
+#else
 PG_MODULE_MAGIC;
+#endif
 
 PG_FUNCTION_INFO_V1(pg_index_stats_build);
 
@@ -52,17 +59,287 @@ static char *stattypes = DEFAULT_STATTYPES;
 static int extstat_columns_limit = 5; /* Don't allow to be too expensive */
 static bool combine_stats = true;
 
+
 /* Stuff for the explain extension */
 #if PG_VERSION_NUM >= 180000
+#include "catalog/pg_statistic.h"
+#include "commands/explain_format.h"
+//#include "optimizer/planner.h"
+#include "utils/selfuncs.h"
+#include "utils/syscache.h"
+
 static int	es_extension_id = -1;
 static explain_per_plan_hook_type prev_explain_per_plan_hook = NULL;
+static get_relation_stats_hook_type prev_get_relation_stats_hook = NULL;
+static get_index_stats_hook_type prev_get_index_stats_hook = NULL;
+static ExplainOneQuery_hook_type prev_ExplainOneQuery_hook = NULL;
 
 static void table_stat_handler(ExplainState *es, DefElem *opt, ParseState *pstate);
 static void table_stat_per_plan_hook(PlannedStmt *plannedstmt, IntoClause *into,
 									 ExplainState *es, const char *queryString,
 									 ParamListInfo params,
 									 QueryEnvironment *queryEnv);
+
+
+ typedef struct table_stat_options
+ {
+	 bool showstat;
+ } table_stat_options;
+
+
+typedef struct RelStatEntryKey
+{
+	Oid			relid;
+	AttrNumber	attnum;
+} RelStatEntryKey;
+
+typedef struct RelStatEntry
+{
+	RelStatEntryKey	key;
+
+	int				freq;
+
+	bool			mcv;
+	int				mcv_nvalues;
+
+	bool			mcelems;
+	int				mcelems_nvalues;
+
+	bool			hist;
+	int				hist_nvalues;
+
+	bool			range_hist;
+	int				range_hist_nvalues;
+
+	bool			dec_hist;
+	int				dec_hist_nvalues;
+
+	bool			corr;
+} RelStatEntry;
+
+static HTAB *sc_htab = NULL;
+
+/*
+ * We need to avoid mixing statistics gathered on different levels of explain -
+ * remember, inside an EXPLAIN ANALYZE a stored routine may be executed which
+ * at its turn, may execute an EXPLAIN ANALYZE.
+ *
+ * It also allows us to clean statistics at proper moment and disable actions in
+ * the relation_stats_hook at any level more than one.
+ */
+static int explain_level = 0;
+
+static bool sc_enable = false;
+
+static bool
+index_stats_hook(PlannerInfo *root, Oid indexOid, AttrNumber indexattnum,
+				 VariableStatData *vardata)
+{
+	/* TODO: at first we need to identify the use case */
+
+	if (prev_get_index_stats_hook)
+		return (*prev_get_index_stats_hook) (root, indexOid, indexattnum, vardata);
+
+	return false;
+}
+
+/*
+ * Register the fact that statistics was requested. Save that fact until the
+ * end of explain process and print it.
+ * We don't afraid overhead because it should work only with explains.
+ */
+static bool
+relation_stats_hook(PlannerInfo *root, RangeTblEntry *rte, AttrNumber attnum,
+					VariableStatData *vardata)
+{
+	HeapTuple		statsTuple;
+	AttStatsSlot	sslot;
+	RelStatEntry   *entry;
+	RelStatEntryKey	key;
+	bool			found;
+	int				i;
+
+	if (!sc_enable || rte->rtekind != RTE_RELATION)
+		return false;
+
+	Assert(OidIsValid(rte->relid));
+
+	if (explain_level != 1)
+		/*
+		 * We may design multi-level stat gathering and showing in each explain
+		 * but for this purpose we need to invent a storage for each level stat.
+		 */
+		return false;
+
+	statsTuple = SearchSysCache3(STATRELATTINH, ObjectIdGetDatum(rte->relid),
+								 Int16GetDatum(attnum), BoolGetDatum(rte->inh));
+
+	if (!HeapTupleIsValid(statsTuple))
+	{
+		return false;
+	}
+
+	if (sc_htab == NULL)
+	{
+		const HASHCTL info = {
+								.hcxt = TopMemoryContext,
+								.keysize = sizeof(RelStatEntryKey),
+								.entrysize = sizeof(RelStatEntry)
+							};
+		sc_htab = hash_create(MODULE_NAME" stats hash", 64, &info,
+								HASH_ELEM | HASH_BLOBS);
+	}
+
+	/*
+	 * Now, we have a stat. need to probe it and detect which type of statistic
+	 * exists there.
+	 */
+
+	memset(&key, 0, sizeof(RelStatEntryKey));
+
+	for (i = 1; i < root->simple_rel_array_size; i++)
+	{
+		if (root->simple_rte_array[i] != rte)
+			continue;
+
+		break;
+	}
+	Assert(i < root->simple_rel_array_size);
+
+	/* Use the index instead of oid to see which statistics was used */
+	key.relid = i;
+
+	key.attnum = attnum;
+	entry = hash_search(sc_htab, &key, HASH_ENTER, &found);
+	if (!found)
+	{
+		entry->freq = 0;
+		entry->dec_hist = false;
+		entry->hist = false;
+		entry->range_hist = false;
+		entry->mcelems = false;
+		entry->mcv = false;
+		entry->corr = false;
+	}
+
+	entry->freq++;
+
+	/*
+	 * Check what kind of statistic exists on this column and how big it is.
+	 * We need only numbers to avoid unnecessary overhead.
+	 */
+	if (get_attstatsslot(&sslot, statsTuple,
+						 STATISTIC_KIND_MCV, InvalidOid, ATTSTATSSLOT_NUMBERS))
+	{
+		entry->mcv = true;
+		entry->mcv_nvalues = sslot.nnumbers;
+		free_attstatsslot(&sslot);
+	}
+	if (get_attstatsslot(&sslot, statsTuple,
+		STATISTIC_KIND_MCELEM, InvalidOid, ATTSTATSSLOT_NUMBERS))
+	{
+		entry->mcelems = true;
+		entry->mcelems_nvalues = sslot.nnumbers;
+		free_attstatsslot(&sslot);
+	}
+	if (get_attstatsslot(&sslot, statsTuple,
+		STATISTIC_KIND_HISTOGRAM, InvalidOid, ATTSTATSSLOT_VALUES)) /* Doesn't have numbers? */
+	{
+		entry->hist = true;
+		entry->hist_nvalues = sslot.nnumbers;
+		free_attstatsslot(&sslot);
+	}
+	if (get_attstatsslot(&sslot, statsTuple,
+		STATISTIC_KIND_RANGE_LENGTH_HISTOGRAM, InvalidOid, ATTSTATSSLOT_NUMBERS))
+	{
+		entry->range_hist = true;
+		entry->range_hist_nvalues = sslot.nnumbers;
+		free_attstatsslot(&sslot);
+	}
+	if (get_attstatsslot(&sslot, statsTuple,
+		STATISTIC_KIND_DECHIST, InvalidOid, ATTSTATSSLOT_NUMBERS))
+	{
+		entry->dec_hist = true;
+		entry->dec_hist_nvalues = sslot.nnumbers;
+		free_attstatsslot(&sslot);
+	}
+	if (get_attstatsslot(&sslot, statsTuple,
+		STATISTIC_KIND_CORRELATION, InvalidOid, ATTSTATSSLOT_NUMBERS))
+	{
+		entry->corr = true;
+		free_attstatsslot(&sslot);
+	}
+
+	ReleaseSysCache(statsTuple);
+
+	/*
+	 * If someone else uses this hook let them do the job and reuse their
+	 * decision
+	 */
+	if (prev_get_relation_stats_hook)
+		return (*prev_get_relation_stats_hook) (root, rte, attnum, vardata);
+
+	/* Or just return false - we don't provide any stats here */
+	return false;
+}
+
+static void
+sc_ExplainOneQuery_hook(Query *query, int cursorOptions, IntoClause *into,
+						struct ExplainState *es, const char *queryString,
+						ParamListInfo params, QueryEnvironment *queryEnv)
+{
+	Assert(es_extension_id >= 0);
+	explain_level++;
+
+	/*
+	 * Do nothing if EXPLAIN doesn't include our options.
+	 * It may happen that next EXPLAIN down the recursion contains that option.
+	 * In this case we show statistics only for the first explain, enabled it.
+	 * Does it seem strange?
+	 */
+	if (explain_level == 1)
+	{
+		table_stat_options *options;
+
+		Assert(sc_enable == false);
+		options = GetExplainExtensionState(es, es_extension_id);
+		if (options != NULL && options->showstat)
+			sc_enable = true;
+	}
+
+	PG_TRY();
+	{
+		if (prev_ExplainOneQuery_hook)
+			(*prev_ExplainOneQuery_hook) (query, cursorOptions, into, es,
+										  queryString, params, queryEnv);
+		else
+			standard_ExplainOneQuery(query, cursorOptions, into, es,
+									 queryString, params, queryEnv);
+	}
+	PG_FINALLY();
+	{
+		explain_level--;
+
+		if (explain_level == 0)
+		{
+			/* Cleanup after the end of top-level explain */
+			if (sc_htab != NULL)
+			{
+				hash_destroy(sc_htab);
+				sc_htab = NULL;
+
+				/* Does hash table is filled without a command? */
+				Assert(sc_enable == true);
+			}
+
+			sc_enable = false;
+		}
+	}
+	PG_END_TRY();
+}
+
 #endif
+
 
 /* Local Memory Context to avoid multiple free commands */
 MemoryContext mem_ctx = NULL;
@@ -607,6 +884,13 @@ _PG_init(void)
 
 	prev_explain_per_plan_hook = explain_per_plan_hook;
 	explain_per_plan_hook = table_stat_per_plan_hook;
+
+	prev_get_relation_stats_hook = get_relation_stats_hook;
+	get_relation_stats_hook = relation_stats_hook;
+	prev_ExplainOneQuery_hook = ExplainOneQuery_hook;
+	ExplainOneQuery_hook = sc_ExplainOneQuery_hook;
+	prev_get_index_stats_hook = get_index_stats_hook;
+	get_index_stats_hook = index_stats_hook;
 #endif
 }
 
@@ -618,11 +902,6 @@ _PG_init(void)
  **************************************************************************** */
 
  #if PG_VERSION_NUM >= 180000
-
- typedef struct table_stat_options
- {
-	 bool showstat;
- } table_stat_options;
 
  static table_stat_options *
  table_stat_ensure_options(ExplainState *es)
@@ -648,6 +927,51 @@ _PG_init(void)
 	 options->showstat = defGetBoolean(opt);
  }
 
+ #include "parser/parsetree.h"
+ static void
+ relation_stats_show(ExplainState *es)
+ {
+	HASH_SEQ_STATUS	status;
+	RelStatEntry   *entry;
+
+	if (sc_htab == NULL || hash_get_num_entries(sc_htab) == 0)
+	{
+		appendStringInfo(es->str, "No statistics used during the query planning");
+		return;
+	}
+
+	hash_seq_init(&status, sc_htab);
+	while ((entry = (RelStatEntry *) hash_seq_search(&status)) != NULL)
+	{
+		RangeTblEntry  *rte;
+		char		   *attname;
+
+		rte = rt_fetch(entry->key.relid, es->rtable);
+		attname = get_attname(rte->relid, entry->key.attnum, false);
+
+		appendStringInfo(es->str, "\"%s.%s: %d times, stats: {",
+						 rte->eref->aliasname, attname,
+						 entry->freq);
+		if (entry->mcv)
+			appendStringInfo(es->str, " MCV: %d values;", entry->mcv_nvalues);
+		if (entry->hist)
+			appendStringInfo(es->str, " Histogram: %d values;",
+							 entry->hist_nvalues);
+		if (entry->dec_hist)
+			appendStringInfo(es->str, " Dist histogram: %d values;",
+							 entry->dec_hist_nvalues);
+		if (entry->mcelems)
+			appendStringInfo(es->str, " MC Elements: %d values;",
+							 entry->mcelems_nvalues);
+		if (entry->range_hist)
+			appendStringInfo(es->str, " Range histogram: %d values;",
+							 entry->range_hist_nvalues);
+		if (entry->corr)
+			appendStringInfo(es->str, " Correlation");
+		appendStringInfo(es->str, " }\"\n");
+	}
+ }
+
  static void
  table_stat_per_plan_hook(PlannedStmt *plannedstmt,
 						  IntoClause *into,
@@ -656,17 +980,31 @@ _PG_init(void)
 						  ParamListInfo params,
 						  QueryEnvironment *queryEnv)
  {
-	 table_stat_options *options;
+	table_stat_options *options;
 
-	 if (prev_explain_per_plan_hook)
-		 (*prev_explain_per_plan_hook) (plannedstmt, into, es, queryString,
-										params, queryEnv);
+	if (prev_explain_per_plan_hook)
+		(*prev_explain_per_plan_hook) (plannedstmt, into, es, queryString,
+									   params, queryEnv);
 
-	 options = GetExplainExtensionState(es, es_extension_id);
-	 if (options == NULL || !options->showstat)
-		 return;
+	options = GetExplainExtensionState(es, es_extension_id);
+	if (options == NULL || !options->showstat)
+		return;
 
+	ExplainOpenGroup("Statistics", "Statistics", true, es);
 
+	if (es->format == EXPLAIN_FORMAT_TEXT)
+	{
+		ExplainIndentText(es);
+		appendStringInfo(es->str, "Statistics:\n");
+		es->indent++;
+	}
+	relation_stats_show(es);
+
+	if (es->format == EXPLAIN_FORMAT_TEXT)
+	{
+		es->indent--;
+	}
+	ExplainCloseGroup("Statistics", "Statistics", true, es);
  }
 
  #endif
