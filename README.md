@@ -41,6 +41,20 @@ The function `pg_index_stats_rebuild` will pass over all the database non-system
 Since Postgres 18 we have a set of hooks that allows to add information into the EXPLAIN output.
 Here we add an explain boolena option 'STAT'. If enabled it gathers requests on the access to plain statistic tuples. Shows number of accesses and statistic nomenclature (including number of stat values) available for estimations.
 Opens a door to get insights on where we have lack of statistics and where we may increase the statistics_target.
+
+An example:
+```
+EXPLAIN (COSTS OFF, STAT ON)
+SELECT * FROM sc_a WHERE x=1 AND y LIKE 'a';
+
+ Seq Scan on sc_a
+   Filter: ((y ~~ 'a'::text) AND (x = 1))
+ Statistics:
+ "sc_a.y: 1 times, stats: { MCV: 10 values; Correlation }"
+ "sc_a.x: 1 times, stats: { Histogram: 0 values; Correlation }"
+```
+In this example you may see that column sc_a.y doesn't have histogram statistic. Column `x` has a zero-bin histogram slot.
+
 Regression test alternative output `sc_explain_0.out` allows to successfully pass it even on earlier Postgres version.
 
 # Notes
