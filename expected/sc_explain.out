@@ -57,51 +57,69 @@ SELECT * FROM sc_a WHERE x=1 AND y LIKE 'a';
 VACUUM ANALYZE sc_a;
 EXPLAIN (COSTS OFF, STAT ON)
 SELECT * FROM sc_a WHERE x=1 AND y LIKE 'a';
-                           QUERY PLAN                           
-----------------------------------------------------------------
+                                                   QUERY PLAN                                                    
+-----------------------------------------------------------------------------------------------------------------
  Seq Scan on sc_a
    Filter: ((y ~~ 'a'::text) AND (x = 1))
  Statistics:
- "sc_a.y: 1 times, stats: { MCV: 10 values; Correlation }"
- "sc_a.x: 1 times, stats: { Histogram: 0 values; Correlation }"
+   "sc_a.y: 1 times, stats: { MCV: 10 values, Correlation, ndistinct: 10.0000, nullfrac: 0.0000, width: 5 }
+   "sc_a.x: 1 times, stats: { Histogram: 0 values, Correlation, ndistinct: -1.0000, nullfrac: 0.0000, width: 4 }
 (5 rows)
 
 EXPLAIN (COSTS OFF, STAT ON)
 SELECT * FROM sc_a s1 JOIN sc_a s2 ON true
 WHERE s1.x=1 AND s2.y LIKE 'a';
-                          QUERY PLAN                          
---------------------------------------------------------------
+                                                  QUERY PLAN                                                   
+---------------------------------------------------------------------------------------------------------------
  Nested Loop
    ->  Seq Scan on sc_a s1
          Filter: (x = 1)
    ->  Seq Scan on sc_a s2
          Filter: (y ~~ 'a'::text)
  Statistics:
- "s2.y: 1 times, stats: { MCV: 10 values; Correlation }"
- "s1.x: 1 times, stats: { Histogram: 0 values; Correlation }"
+   "s2.y: 1 times, stats: { MCV: 10 values, Correlation, ndistinct: 10.0000, nullfrac: 0.0000, width: 5 }
+   "s1.x: 1 times, stats: { Histogram: 0 values, Correlation, ndistinct: -1.0000, nullfrac: 0.0000, width: 4 }
 (8 rows)
 
 -- Check format
 EXPLAIN (COSTS OFF, STAT ON, FORMAT JSON)
 SELECT * FROM sc_a WHERE x=1 AND y LIKE 'a';
-                                  QUERY PLAN                                  
-------------------------------------------------------------------------------
- [                                                                           +
-   {                                                                         +
-     "Plan": {                                                               +
-       "Node Type": "Seq Scan",                                              +
-       "Parallel Aware": false,                                              +
-       "Async Capable": false,                                               +
-       "Relation Name": "sc_a",                                              +
-       "Alias": "sc_a",                                                      +
-       "Disabled": false,                                                    +
-       "Filter": "((y ~~ 'a'::text) AND (x = 1))"                            +
-     },                                                                      +
-     "Statistics": {"sc_a.y: 1 times, stats: { MCV: 10 values; Correlation }"+
- "sc_a.x: 1 times, stats: { Histogram: 0 values; Correlation }"              +
-                                                                             +
-     }                                                                       +
-   }                                                                         +
+                    QUERY PLAN                    
+--------------------------------------------------
+ [                                               +
+   {                                             +
+     "Plan": {                                   +
+       "Node Type": "Seq Scan",                  +
+       "Parallel Aware": false,                  +
+       "Async Capable": false,                   +
+       "Relation Name": "sc_a",                  +
+       "Alias": "sc_a",                          +
+       "Disabled": false,                        +
+       "Filter": "((y ~~ 'a'::text) AND (x = 1))"+
+     },                                          +
+     "Statistics": {                             +
+       "table": "sc_a",                          +
+       "attname": "y",                           +
+       "times": 1,                               +
+       "stats": {                                +
+         "MCV values": 10,                       +
+         "Correlation": true,                    +
+         "ndistinct": 10.0000,                   +
+         "nullfrac": 0.0000,                     +
+         "width": 5                              +
+       },                                        +
+       "table": "sc_a",                          +
+       "attname": "x",                           +
+       "times": 1,                               +
+       "stats": {                                +
+         "Histogram values": 0,                  +
+         "Correlation": true,                    +
+         "ndistinct": -1.0000,                   +
+         "nullfrac": 0.0000,                     +
+         "width": 4                              +
+       }                                         +
+     }                                           +
+   }                                             +
  ]
 (1 row)
 
