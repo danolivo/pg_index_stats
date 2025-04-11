@@ -8,7 +8,9 @@ PGFILEDESC = "pg_index_stats - create extended statistics"
 
 REGRESS = basic module duplicates sc_explain
 EXTENSION = pg_index_stats
-DATA = pg_index_stats--0.2.sql
+DATA = pg_index_stats--0.3.sql
+EXTRA_INSTALL=contrib/pg_stat_statements
+TAP_TESTS = 1
 
 ifdef USE_PGXS
 PG_CONFIG ?= pg_config
