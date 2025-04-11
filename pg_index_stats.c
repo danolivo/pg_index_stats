@@ -115,6 +115,10 @@ typedef struct RelStatEntry
 	int				dec_hist_nvalues;
 
 	bool			corr;
+
+	double			stadistinct;
+	double			stanullfrac;
+	double			stawidth;
 } RelStatEntry;
 
 static HTAB *sc_htab = NULL;
@@ -153,6 +157,7 @@ relation_stats_hook(PlannerInfo *root, RangeTblEntry *rte, AttrNumber attnum,
 					VariableStatData *vardata)
 {
 	HeapTuple		statsTuple;
+	Form_pg_statistic stats;
 	AttStatsSlot	sslot;
 	RelStatEntry   *entry;
 	RelStatEntryKey	key;
@@ -270,6 +275,10 @@ relation_stats_hook(PlannerInfo *root, RangeTblEntry *rte, AttrNumber attnum,
 		free_attstatsslot(&sslot);
 	}
 
+	stats = ((Form_pg_statistic) GETSTRUCT(statsTuple));
+	entry->stadistinct = stats->stadistinct;
+	entry->stanullfrac = stats->stanullfrac;
+	entry->stawidth = stats->stawidth;
 	ReleaseSysCache(statsTuple);
 
 	/*
@@ -949,26 +958,62 @@ _PG_init(void)
 		rte = rt_fetch(entry->key.relid, es->rtable);
 		attname = get_attname(rte->relid, entry->key.attnum, false);
 
-		appendStringInfo(es->str, "\"%s.%s: %d times, stats: {",
-						 rte->eref->aliasname, attname,
-						 entry->freq);
-		if (entry->mcv)
-			appendStringInfo(es->str, " MCV: %d values;", entry->mcv_nvalues);
-		if (entry->hist)
-			appendStringInfo(es->str, " Histogram: %d values;",
-							 entry->hist_nvalues);
-		if (entry->dec_hist)
-			appendStringInfo(es->str, " Dist histogram: %d values;",
-							 entry->dec_hist_nvalues);
-		if (entry->mcelems)
-			appendStringInfo(es->str, " MC Elements: %d values;",
-							 entry->mcelems_nvalues);
-		if (entry->range_hist)
-			appendStringInfo(es->str, " Range histogram: %d values;",
-							 entry->range_hist_nvalues);
-		if (entry->corr)
-			appendStringInfo(es->str, " Correlation");
-		appendStringInfo(es->str, " }\"\n");
+		if (es->format != EXPLAIN_FORMAT_TEXT)
+		{
+			ExplainPropertyText("table", rte->eref->aliasname, es);
+			ExplainPropertyText("attname", attname, es);
+			ExplainPropertyInteger("times", NULL, entry->freq, es);
+			ExplainOpenGroup("Stats", "stats", true, es);
+			if (entry->mcv)
+				ExplainPropertyInteger("MCV values", NULL, entry->mcv_nvalues, es);
+			if (entry->hist)
+				ExplainPropertyInteger("Histogram values", NULL,
+									   entry->hist_nvalues, es);
+			if (entry->dec_hist)
+				ExplainPropertyInteger("Dist histogram values", NULL,
+									   entry->dec_hist_nvalues, es);
+			if (entry->mcelems)
+				ExplainPropertyInteger("MC Elements values", NULL,
+									   entry->mcelems_nvalues, es);
+			if (entry->range_hist)
+				ExplainPropertyInteger("Range histogram values", NULL,
+									   entry->range_hist_nvalues, es);
+			if (entry->corr)
+				ExplainPropertyBool("Correlation", true, es);
+
+			ExplainPropertyFloat("ndistinct", NULL, entry->stadistinct, 4, es);
+			ExplainPropertyFloat("nullfrac", NULL, entry->stanullfrac, 4, es);
+			ExplainPropertyFloat("width", NULL, entry->stawidth, 0, es);
+			ExplainCloseGroup("Stats", "stats", true, es);
+		}
+		else
+		{
+			ExplainIndentText(es);
+			appendStringInfo(es->str, "\"%s.%s: %d times, stats: {",
+							 rte->eref->aliasname, attname, entry->freq);
+			if (entry->mcv)
+				appendStringInfo(es->str, " MCV: %d values,", entry->mcv_nvalues);
+			if (entry->hist)
+				appendStringInfo(es->str, " Histogram: %d values,",
+								 entry->hist_nvalues);
+			if (entry->dec_hist)
+				appendStringInfo(es->str, " Dist histogram: %d values,",
+								 entry->dec_hist_nvalues);
+			if (entry->mcelems)
+				appendStringInfo(es->str, " MC Elements: %d values,",
+								 entry->mcelems_nvalues);
+			if (entry->range_hist)
+				appendStringInfo(es->str, " Range histogram: %d values,",
+								 entry->range_hist_nvalues);
+			if (entry->corr)
+				appendStringInfo(es->str, " Correlation,");
+
+			appendStringInfo(es->str, " ndistinct: %.4lf, nullfrac: %.4lf, width: %.0lf",
+							 entry->stadistinct, entry->stanullfrac,
+							 entry->stawidth);
+			appendStringInfo(es->str, " }\n");
+		}
+
 	}
  }
 
