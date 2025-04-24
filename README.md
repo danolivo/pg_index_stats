@@ -44,14 +44,18 @@ Opens a door to get insights on where we have lack of statistics and where we ma
 
 An example:
 ```
+CREATE TABLE sc_a(x integer, y text) WITH (autovacuum_enabled = off);
+INSERT INTO sc_a(x,y) (SELECT gs, 'abc'||gs%10 FROM generate_series(1,100) AS gs);
+VACUUM ANALYZE sc_a;
+
 EXPLAIN (COSTS OFF, STAT ON)
 SELECT * FROM sc_a WHERE x=1 AND y LIKE 'a';
 
  Seq Scan on sc_a
    Filter: ((y ~~ 'a'::text) AND (x = 1))
  Statistics:
- "sc_a.y: 1 times, stats: { MCV: 10 values; Correlation }"
- "sc_a.x: 1 times, stats: { Histogram: 0 values; Correlation }"
+   "sc_a.y: 1 times, stats: { MCV: 10 values, Correlation, ndistinct: 10.0000, nullfrac: 0.0000, width: 5 }
+   "sc_a.x: 1 times, stats: { Histogram: 0 values, Correlation, ndistinct: -1.0000, nullfrac: 0.0000, width: 4 }
 ```
 In this example you may see that column sc_a.y doesn't have histogram statistic. Column `x` has a zero-bin histogram slot.
 
