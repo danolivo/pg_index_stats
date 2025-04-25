@@ -945,7 +945,7 @@ _PG_init(void)
 
 	if (sc_htab == NULL || hash_get_num_entries(sc_htab) == 0)
 	{
-		appendStringInfo(es->str, "No statistics used during the query planning");
+		appendStringInfo(es->str, "No statistics used during the query planning\n");
 		return;
 	}
 
