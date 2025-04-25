@@ -960,7 +960,10 @@ _PG_init(void)
 
 		if (es->format != EXPLAIN_FORMAT_TEXT)
 		{
-			ExplainPropertyText("table", rte->eref->aliasname, es);
+			ExplainPropertyText("table", get_rel_name(rte->relid), es);
+			if (rte->alias && rte->alias->aliasname)
+				ExplainPropertyText("alias", rte->alias->aliasname, es);
+
 			ExplainPropertyText("attname", attname, es);
 			ExplainPropertyInteger("times", NULL, entry->freq, es);
 			ExplainOpenGroup("Stats", "stats", true, es);
@@ -989,8 +992,14 @@ _PG_init(void)
 		else
 		{
 			ExplainIndentText(es);
-			appendStringInfo(es->str, "\"%s.%s: %d times, stats: {",
-							 rte->eref->aliasname, attname, entry->freq);
+			if (rte->alias && rte->alias->aliasname)
+				appendStringInfo(es->str, "%s (%s).%s: %d times, stats: {",
+								 get_rel_name(rte->relid),
+								 rte->alias->aliasname,  attname, entry->freq);
+			else
+				appendStringInfo(es->str, "%s.%s: %d times, stats: {",
+								 get_rel_name(rte->relid), attname,
+								 entry->freq);
 			if (entry->mcv)
 				appendStringInfo(es->str, " MCV: %d values,", entry->mcv_nvalues);
 			if (entry->hist)
