@@ -1,0 +1,3 @@
+CREATE EXTENSION pg_index_stats;
+
+DROP EXTENSION pg_index_stats;

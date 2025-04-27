@@ -3,10 +3,10 @@
 MODULE_big = pg_index_stats
 OBJS = \
 	$(WIN32RES) \
-	pg_index_stats.o duplicated_slots.o
+	pg_index_stats.o duplicated_slots.o qds.o
 PGFILEDESC = "pg_index_stats - create extended statistics"
 
-REGRESS = basic module duplicates sc_explain
+REGRESS = basic module duplicates sc_explain qds
 EXTENSION = pg_index_stats
 DATA = pg_index_stats--0.2.sql
 
