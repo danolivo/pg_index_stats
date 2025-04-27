@@ -280,7 +280,7 @@ reduce_duplicated_stat(const List *exprs, Bitmapset *atts_used,
 	List		   *cmpsList;
 	ListCell	   *lc;
 
-	oldctx = MemoryContextSwitchTo(mem_ctx);
+	oldctx = MemoryContextSwitchTo(pg_index_stats_mem_ctx);
 
 	Assert(stat_types > 0);
 

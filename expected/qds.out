@@ -1,2 +1,160 @@
 CREATE EXTENSION pg_index_stats;
+CREATE TABLE qds1 (x integer, y integer);
+INSERT INTO qds1 (x,y)
+  SELECT value % 72, value % 36 FROM generate_series(1, 10000) AS value;
+INSERT INTO qds1 (x,y)
+  SELECT value % 250 + 100, value % 250 + 100
+  FROM generate_series(1, 1000) AS value;
+VACUUM ANALYZE qds1;
+SELECT * FROM check_estimated_rows('
+  SELECT x,y FROM qds1 WHERE x = 1 AND y = 1;');
+ estimated | actual 
+-----------+--------
+         4 |    139
+(1 row)
+
+EXPLAIN (COSTS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x = 1 AND y = 1; -- ERROR, needs ANALYZE
+ERROR:  EXPLAIN option EXTSTAT_CANDIDATES requires ANALYZE
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF, BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x = 1 AND y = 1;
+                  QUERY PLAN                   
+-----------------------------------------------
+ Seq Scan on qds1 (actual rows=139.00 loops=1)
+   Filter: ((x = 1) AND (y = 1))
+   Rows Removed by Filter: 10861
+   Candidate extstat quals: x, y
+(4 rows)
+
+SELECT * FROM check_estimated_rows('
+  SELECT x,y FROM qds1 WHERE x = 1 AND y = 2;');
+ estimated | actual 
+-----------+--------
+         4 |      0
+(1 row)
+
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x = 1 AND y = 2
+; -- Nothing to recommend - too little tuples produced
+                 QUERY PLAN                  
+---------------------------------------------
+ Seq Scan on qds1 (actual rows=0.00 loops=1)
+   Filter: ((x = 1) AND (y = 2))
+   Rows Removed by Filter: 11000
+(3 rows)
+
+SELECT * FROM check_estimated_rows('
+  SELECT x,y FROM qds1 WHERE x = 101 AND y = 101;');
+ estimated | actual 
+-----------+--------
+         1 |      4
+(1 row)
+
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x = 101 AND y = 101;
+                 QUERY PLAN                  
+---------------------------------------------
+ Seq Scan on qds1 (actual rows=4.00 loops=1)
+   Filter: ((x = 101) AND (y = 101))
+   Rows Removed by Filter: 10996
+   Candidate extstat quals: x, y
+(4 rows)
+
+SELECT * FROM check_estimated_rows('
+  SELECT x,y FROM qds1 WHERE x = 71 AND y % 35 = 0');
+ estimated | actual 
+-----------+--------
+         1 |    138
+(1 row)
+
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x = 72 AND y % 36 = 0
+; -- Combine expression and column
+                 QUERY PLAN                  
+---------------------------------------------
+ Seq Scan on qds1 (actual rows=0.00 loops=1)
+   Filter: ((x = 72) AND ((y % 36) = 0))
+   Rows Removed by Filter: 11000
+(3 rows)
+
+SELECT * FROM check_estimated_rows('
+  SELECT x,y FROM qds1 WHERE x % 71 = 0 AND x = 71 AND y % 35 = 0');
+ estimated | actual 
+-----------+--------
+         1 |    138
+(1 row)
+
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x % 71 = 0 AND x = 71 AND y % 35 = 0
+; -- there are couple of expressions with a column
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Seq Scan on qds1 (actual rows=138.00 loops=1)
+   Filter: ((x = 71) AND ((x % 71) = 0) AND ((y % 35) = 0))
+   Rows Removed by Filter: 10862
+   Candidate extstat quals: x, (x % 71), (y % 35)
+(4 rows)
+
+SELECT * FROM check_estimated_rows('
+  SELECT x,y FROM qds1 WHERE x % 71 = 0 AND x = 71');
+ estimated | actual 
+-----------+--------
+         1 |    138
+(1 row)
+
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x % 71 = 0 AND x = 71
+; -- Same column, but expression and column itself
+                  QUERY PLAN                   
+-----------------------------------------------
+ Seq Scan on qds1 (actual rows=138.00 loops=1)
+   Filter: ((x = 71) AND ((x % 71) = 0))
+   Rows Removed by Filter: 10862
+   Candidate extstat quals: x, (x % 71)
+(4 rows)
+
+SELECT * FROM check_estimated_rows('
+  SELECT x,y FROM qds1 WHERE x IN (71) AND y > 33 AND y < 37');
+ estimated | actual 
+-----------+--------
+         7 |    138
+(1 row)
+
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x IN (71) AND y > 33 AND y < 37
+; -- Two columns, but one of them is inequality
+                   QUERY PLAN                   
+------------------------------------------------
+ Seq Scan on qds1 (actual rows=138.00 loops=1)
+   Filter: ((y > 33) AND (y < 37) AND (x = 71))
+   Rows Removed by Filter: 10862
+   Candidate extstat quals: x, y
+(4 rows)
+
+SELECT * FROM check_estimated_rows('
+  SELECT x,y FROM qds1 WHERE x > 70 AND x < 72 AND x = 71');
+ estimated | actual 
+-----------+--------
+         2 |    138
+(1 row)
+
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x > 70 AND x < 72 AND x = 71
+; -- The same column only, couple inequalities, no extended statistics
+                   QUERY PLAN                   
+------------------------------------------------
+ Seq Scan on qds1 (actual rows=138.00 loops=1)
+   Filter: ((x > 70) AND (x < 72) AND (x = 71))
+   Rows Removed by Filter: 10862
+   Candidate extstat quals: x
+(4 rows)
+
+DROP FUNCTION check_estimated_rows;
 DROP EXTENSION pg_index_stats;

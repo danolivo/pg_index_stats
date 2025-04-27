@@ -80,13 +80,6 @@ static void table_stat_per_plan_hook(PlannedStmt *plannedstmt, IntoClause *into,
 									 ParamListInfo params,
 									 QueryEnvironment *queryEnv);
 
-
- typedef struct table_stat_options
- {
-	 bool showstat;
- } table_stat_options;
-
-
 typedef struct RelStatEntryKey
 {
 	Oid			relid;
@@ -308,11 +301,11 @@ sc_ExplainOneQuery_hook(Query *query, int cursorOptions, IntoClause *into,
 	 */
 	if (explain_level == 1)
 	{
-		table_stat_options *options;
+		StatMgrOptions *options;
 
 		Assert(sc_enable == false);
 		options = GetExplainExtensionState(es, es_extension_id);
-		if (options != NULL && options->showstat)
+		if (options != NULL && options->show_stat)
 			sc_enable = true;
 	}
 
@@ -351,7 +344,7 @@ sc_ExplainOneQuery_hook(Query *query, int cursorOptions, IntoClause *into,
 
 
 /* Local Memory Context to avoid multiple free commands */
-MemoryContext mem_ctx = NULL;
+MemoryContext pg_index_stats_mem_ctx = NULL;
 
 void _PG_init(void);
 
@@ -425,7 +418,7 @@ get_statistic_types()
 	char	   *tmp_stattypes;
 	MemoryContext oldctx;
 
-	oldctx = MemoryContextSwitchTo(mem_ctx);
+	oldctx = MemoryContextSwitchTo(pg_index_stats_mem_ctx);
 	tmp_stattypes = pstrdup(stattypes);
 	if (!SplitDirectoriesString(tmp_stattypes, ',', &elemlist))
 	{
@@ -462,7 +455,7 @@ get_statistic_types()
 	}
 
 	MemoryContextSwitchTo(oldctx);
-	MemoryContextReset(mem_ctx);
+	MemoryContextReset(pg_index_stats_mem_ctx);
 	return statistic_types;
 }
 
@@ -868,8 +861,7 @@ _PG_init(void)
 								0,
 								NULL,
 								NULL,
-								NULL
-	   );
+								NULL);
 
 	next_object_access_hook = object_access_hook;
 	object_access_hook = extstat_remember_index_hook;
@@ -877,7 +869,7 @@ _PG_init(void)
 	next_ProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = after_utility_extstat_creation;
 
-	mem_ctx = AllocSetContextCreate(TopMemoryContext,
+	pg_index_stats_mem_ctx = AllocSetContextCreate(TopMemoryContext,
 											 MODULE_NAME" - local memory context",
 											 ALLOCSET_DEFAULT_SIZES);
 
@@ -915,16 +907,16 @@ _PG_init(void)
 
  #if PG_VERSION_NUM >= 180000
 
- static table_stat_options *
- table_stat_ensure_options(ExplainState *es)
+StatMgrOptions *
+ StatMgrOptions_ensure(ExplainState *es)
  {
-	 table_stat_options *options;
+	 StatMgrOptions *options;
 
 	 options = GetExplainExtensionState(es, es_extension_id);
 
 	 if (options == NULL)
 	 {
-		 options = palloc0(sizeof(table_stat_options));
+		 options = palloc0(sizeof(StatMgrOptions));
 		 SetExplainExtensionState(es, es_extension_id, options);
 	 }
 
@@ -934,9 +926,9 @@ _PG_init(void)
  static void
  table_stat_handler(ExplainState *es, DefElem *opt, ParseState *pstate)
  {
-	 table_stat_options *options = table_stat_ensure_options(es);
+	 StatMgrOptions *options = StatMgrOptions_ensure(es);
 
-	 options->showstat = defGetBoolean(opt);
+	 options->show_stat = defGetBoolean(opt);
  }
 
  #include "parser/parsetree.h"
@@ -1037,14 +1029,14 @@ _PG_init(void)
 						  ParamListInfo params,
 						  QueryEnvironment *queryEnv)
  {
-	table_stat_options *options;
+	StatMgrOptions *options;
 
 	if (prev_explain_per_plan_hook)
 		(*prev_explain_per_plan_hook) (plannedstmt, into, es, queryString,
 									   params, queryEnv);
 
 	options = GetExplainExtensionState(es, es_extension_id);
-	if (options == NULL || !options->showstat)
+	if (options == NULL || !options->show_stat)
 		return;
 
 	ExplainOpenGroup("Statistics", "Statistics", true, es);
