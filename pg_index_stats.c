@@ -713,6 +713,7 @@ cleanup:
 	if (indexInfo)
 		pfree(indexInfo);
 
+
 	AtEOXact_GUC(false, save_nestlevel);
 	SetUserIdAndSecContext(save_userid, save_sec_context);
 
@@ -901,6 +902,8 @@ _PG_init(void)
 	prev_get_index_stats_hook = get_index_stats_hook;
 	get_index_stats_hook = index_stats_hook;
 #endif
+
+	qds_init();
 }
 
 
