@@ -4,6 +4,7 @@
 #include "postgres.h"
 
 #include "access/relation.h"
+#include "commands/explain_state.h"
 
 #define MODULE_NAME "pg_index_stats"
 
@@ -15,9 +16,21 @@
 #define STAT_MCV			(1<<1)
 #define STAT_DEPENDENCIES	(1<<2)
 
-extern MemoryContext mem_ctx;
+/*
+ * Explain options. There are only one way exist is to consolidate all the
+ * options inside a single structure.
+ */
+typedef struct StatMgrOptions
+{
+	bool show_stat;
+	bool show_extstat_candidates;
+} StatMgrOptions;
+
+extern MemoryContext pg_index_stats_mem_ctx;
+extern int current_execution_level;
 
 extern Bitmapset *check_duplicated(List *statList, int32 stat_types);
+StatMgrOptions *StatMgrOptions_ensure(ExplainState *es);
 
 /* Query-based statistic generator routines */
 
