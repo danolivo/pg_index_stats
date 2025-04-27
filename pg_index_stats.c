@@ -251,7 +251,7 @@ relation_stats_hook(PlannerInfo *root, RangeTblEntry *rte, AttrNumber attnum,
 		STATISTIC_KIND_HISTOGRAM, InvalidOid, ATTSTATSSLOT_VALUES)) /* Doesn't have numbers? */
 	{
 		entry->hist = true;
-		entry->hist_nvalues = sslot.nnumbers;
+		entry->hist_nvalues = sslot.nvalues;
 		free_attstatsslot(&sslot);
 	}
 	if (get_attstatsslot(&sslot, statsTuple,
