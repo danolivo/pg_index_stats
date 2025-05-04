@@ -22,8 +22,9 @@
 
 #include "pg_index_stats.h"
 
-static int estimation_error_threshold = 2;
+
 static bool enable_qds = true;
+static double estimation_error_threshold = 2.0;
 
 static int	es_extension_id = -1;
 
@@ -613,6 +614,9 @@ upper_paths_hook(PlannerInfo *root, UpperRelationKind stage,
 		(*prev_create_upper_paths_hook) (root, stage,
 										 input_rel, output_rel, &extra);
 
+	if (estimation_error_threshold < 0.0)
+		return;
+
 	if (stage != UPPERREL_FINAL)
 		return;
 
@@ -721,7 +725,7 @@ probe_candidate_node(PlanState *ps)
 
 	ret = planstate_calculate(ps, &plan_rows, &real_rows, &filtered);
 	if (!ret || real_rows < 2. ||
-		Max(plan_rows / real_rows, real_rows / plan_rows) < 2.0)
+		Max(plan_rows / real_rows, real_rows / plan_rows) < estimation_error_threshold)
 		return false;
 
 	return true;
@@ -929,15 +933,15 @@ void qds_init(void)
 							NULL,
 							NULL);
 
-	DefineCustomIntVariable(MODULE_NAME ".estimation_error_threshold",
+	DefineCustomRealVariable(MODULE_NAME ".estimation_error_threshold",
 							"Planner estimation error deviation, above which "
 							"extended statistics is built",
 							NULL,
 							&estimation_error_threshold,
-							2,
-							-1,
+							2.0,
+							-1.0,
 							INT_MAX,
-							PGC_SUSET,
+							PGC_USERSET,
 							0,
 							NULL,
 							NULL,
