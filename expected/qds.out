@@ -153,8 +153,7 @@ SELECT x,y FROM qds1 WHERE x > 70 AND x < 72 AND x = 71
  Seq Scan on qds1 (actual rows=138.00 loops=1)
    Filter: ((x > 70) AND (x < 72) AND (x = 71))
    Rows Removed by Filter: 10862
-   Candidate extstat quals: x
-(4 rows)
+(3 rows)
 
 DROP FUNCTION check_estimated_rows;
 DROP EXTENSION pg_index_stats;

@@ -548,17 +548,17 @@ typedef struct
 static bool
 gather_compatible_clauses(PlannerInfo *root)
 {
-	CandidateQualEntry *entry;
-	Bitmapset		   *attnums = NULL;
-	List			   *exprs = NIL;
-	bool				found;
 	int					i;
 
 	for (i = 1; i < root->simple_rel_array_size; i++)
 	{
-		RelOptInfo	   *rel = root->simple_rel_array[i];
-		RangeTblEntry  *rte = root->simple_rte_array[i];
-		ListCell	   *lc;
+		CandidateQualEntry *entry;
+		Bitmapset		   *attnums = NULL;
+		List			   *exprs = NIL;
+		bool				found;
+		RelOptInfo		   *rel = root->simple_rel_array[i];
+		RangeTblEntry	   *rte = root->simple_rte_array[i];
+		ListCell		   *lc;
 
 		if (rel == NULL || rel->baserestrictinfo == NIL)
 			continue;
@@ -572,15 +572,15 @@ gather_compatible_clauses(PlannerInfo *root)
 			RestrictInfo *rinfo = lfirst_node(RestrictInfo, lc);
 
 			/* Let's discover conditions */
-			if (!statext_is_compatible_clause(root, (Node *)rinfo, rel->relid,
+			if (!statext_is_compatible_clause(root, (Node *) rinfo, rel->relid,
 											  &attnums, &exprs))
 				continue;
 		}
 
-		if (!bms_is_empty(attnums) || exprs != NIL)
+		if (bms_num_members(attnums) + list_length(exprs) > 1)
 		{
-			CandidateQualEntryKey key;
-			int member;
+			CandidateQualEntryKey	key;
+			int						member;
 
 			Assert(rel->relid > 0 &&
 				   bms_get_singleton_member(rel->relids, &member) &&
@@ -596,7 +596,7 @@ gather_compatible_clauses(PlannerInfo *root)
 				entry->exprs_list = NIL;
 			}
 
-			entry->attnums = bms_union(entry->attnums, attnums);
+			entry->attnums = bms_join(entry->attnums, attnums);
 			entry->exprs_list = list_concat(entry->exprs_list, exprs);
 		}
 	}
@@ -784,6 +784,8 @@ qds_per_node_hook(PlanState *planstate, List *ancestors,
 
 		/* Show candidate clauses for extended statistics definition */
 		entry = fetch_candidate_entry(planstate, es->rtable);
+		if (entry == NULL)
+			return;
 
 		while ((i = bms_next_member(entry->attnums, i)) > 0)
 		{
