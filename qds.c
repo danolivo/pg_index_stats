@@ -39,6 +39,10 @@ static explain_validate_options_hook_type prev_explain_validate_options_hook = N
 static explain_per_node_hook_type prev_explain_per_node_hook = NULL;
 #endif
 
+#if PG_VERSION_NUM < 150000
+typedef double Cardinality;
+#endif
+
 /* *****************************************************************************
  *
  * Copy of extended_stat.c static routines
@@ -850,7 +854,7 @@ int current_execution_level = 0;
 /*
  * ExecutorRun hook: all we need do is track nesting depth
  */
- #if PG_VERSION_NUM >= 170000
+ #if PG_VERSION_NUM >= 180000
  static void
  qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count)
  {
