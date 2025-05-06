@@ -39,7 +39,7 @@ The function `pg_index_stats_rebuild` will pass over all the database non-system
 # Extra EXPLAIN parameter
 
 Since Postgres 18 we have a set of hooks that allows to add information into the EXPLAIN output.
-Here we add an explain boolena option 'STAT'. If enabled it gathers requests on the access to plain statistic tuples. Shows number of accesses and statistic nomenclature (including number of stat values) available for estimations.
+Here we add an explain boolean option 'STAT'. If enabled it gathers requests on the utilisation of plain statistic. Shows number of accesses and statistic nomenclature (including number of stat values) available for estimations.
 Opens a door to get insights on where we have lack of statistics and where we may increase the statistics_target.
 
 An example:
@@ -55,11 +55,11 @@ SELECT * FROM sc_a WHERE x=1 AND y LIKE 'a';
    Filter: ((y ~~ 'a'::text) AND (x = 1))
  Statistics:
    "sc_a.y: 1 times, stats: { MCV: 10 values, Correlation, ndistinct: 10.0000, nullfrac: 0.0000, width: 5 }
-   "sc_a.x: 1 times, stats: { Histogram: 0 values, Correlation, ndistinct: -1.0000, nullfrac: 0.0000, width: 4 }
+   "sc_a.x: 1 times, stats: { Histogram: 100 values, Correlation, ndistinct: -1.0000, nullfrac: 0.0000, width: 4 }
 ```
-In this example you may see that column sc_a.y doesn't have histogram statistic. Column `x` has a zero-bin histogram slot.
+In this example you may see that column sc_a.y doesn't have histogram statistic. Column `x` has a histogram slot containing 100 values.
 
-Regression test alternative output `sc_explain_0.out` allows to successfully pass it even on earlier Postgres version.
+Alternative output `sc_explain_0.out` file allows regression test to successfully pass even on earlier Postgres version.
 
 # Notes
 * Each created statistics depends on the index and the `pg_index_stats` extension. Hence, dropping an index you remove corresponding auto-generated extended statistics. Dropping `pg_index_stats` extension you will remove all auto-generated statistics in the database.
