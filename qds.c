@@ -854,25 +854,25 @@ int current_execution_level = 0;
 /*
  * ExecutorRun hook: all we need do is track nesting depth
  */
- #if PG_VERSION_NUM >= 180000
- static void
- qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count)
- {
-	 current_execution_level++;
-	 PG_TRY();
-	 {
-		 if (prev_ExecutorRun)
-			 prev_ExecutorRun(queryDesc, direction, count);
-		 else
-			 standard_ExecutorRun(queryDesc, direction, count);
-	 }
-	 PG_FINALLY();
-	 {
-		 current_execution_level--;
-	 }
-	 PG_END_TRY();
- }
- #endif
+#if (PG_VERSION_NUM >= 180000)
+static void
+qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count)
+{
+	current_execution_level++;
+	PG_TRY();
+	{
+		if (prev_ExecutorRun)
+			prev_ExecutorRun(queryDesc, direction, count);
+		else
+			standard_ExecutorRun(queryDesc, direction, count);
+	}
+	PG_FINALLY();
+	{
+		current_execution_level--;
+	}
+	PG_END_TRY();
+}
+#else
 static void
 qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count,
 				bool execute_once)
@@ -891,7 +891,7 @@ qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count,
 	}
 	PG_END_TRY();
 }
-
+#endif
  /*
   * ExecutorFinish hook: all we need do is track nesting depth
   */
