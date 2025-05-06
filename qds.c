@@ -9,7 +9,6 @@
 
 #include "commands/defrem.h"
 #include "commands/explain.h"
-#include "commands/explain_format.h"
 #include "executor/executor.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/optimizer.h"
@@ -26,14 +25,19 @@
 static bool enable_qds = true;
 static double estimation_error_threshold = 2.0;
 
-static int	es_extension_id = -1;
-
+static create_upper_paths_hook_type prev_create_upper_paths_hook = NULL;
 static ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
 static ExecutorRun_hook_type prev_ExecutorRun = NULL;
 static ExecutorEnd_hook_type prev_ExecutorEnd_hook = NULL;
+
+#if PG_VERSION_NUM >= 180000
+#include "commands/explain_format.h"
+
+static int	es_extension_id = -1;
+
 static explain_validate_options_hook_type prev_explain_validate_options_hook = NULL;
 static explain_per_node_hook_type prev_explain_per_node_hook = NULL;
-static create_upper_paths_hook_type prev_create_upper_paths_hook = NULL;
+#endif
 
 /* *****************************************************************************
  *
@@ -731,6 +735,8 @@ probe_candidate_node(PlanState *ps)
 	return true;
 }
 
+#if PG_VERSION_NUM >= 180000
+
 /* *****************************************************************************
  *
  * COPY From explain.c
@@ -817,6 +823,24 @@ extstat_candidates_handler(ExplainState *es, DefElem *opt, ParseState *pstate)
 	options->show_extstat_candidates = defGetBoolean(opt);
 }
 
+static void
+qds_explain_validate_options_hook(struct ExplainState *es, List *options,
+								  ParseState *pstate)
+{
+	StatMgrOptions *opts;
+
+	if (prev_explain_validate_options_hook)
+		(*prev_explain_validate_options_hook) (es, options, pstate);
+
+	opts = GetExplainExtensionState(es, es_extension_id);
+
+	if (opts && opts->show_extstat_candidates && !es->analyze)
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("EXPLAIN option %s requires ANALYZE", "EXTSTAT_CANDIDATES")));
+}
+#endif
+
 /*
  * Code to track current execution level to cleanup resource on the upper level.
  */
@@ -826,6 +850,7 @@ int current_execution_level = 0;
 /*
  * ExecutorRun hook: all we need do is track nesting depth
  */
+ #if PG_VERSION_NUM >= 170000
  static void
  qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count)
  {
@@ -843,6 +868,25 @@ int current_execution_level = 0;
 	 }
 	 PG_END_TRY();
  }
+ #endif
+static void
+qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count,
+				bool execute_once)
+{
+	current_execution_level++;
+	PG_TRY();
+	{
+		if (prev_ExecutorRun)
+			prev_ExecutorRun(queryDesc, direction, count, execute_once);
+		else
+			standard_ExecutorRun(queryDesc, direction, count, execute_once);
+	}
+	PG_FINALLY();
+	{
+		current_execution_level--;
+	}
+	PG_END_TRY();
+}
 
  /*
   * ExecutorFinish hook: all we need do is track nesting depth
@@ -903,23 +947,6 @@ qds_ExecutorEnd(QueryDesc *queryDesc)
 		standard_ExecutorEnd(queryDesc);
 }
 
-static void
-qds_explain_validate_options_hook(struct ExplainState *es, List *options,
-								  ParseState *pstate)
-{
-	StatMgrOptions *opts;
-
-	if (prev_explain_validate_options_hook)
-		(*prev_explain_validate_options_hook) (es, options, pstate);
-
-	opts = GetExplainExtensionState(es, es_extension_id);
-
-	if (opts && opts->show_extstat_candidates && !es->analyze)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("EXPLAIN option %s requires ANALYZE", "EXTSTAT_CANDIDATES")));
-}
-
 void qds_init(void)
 {
 	DefineCustomBoolVariable(MODULE_NAME".qds",
@@ -950,20 +977,21 @@ void qds_init(void)
 	prev_create_upper_paths_hook = create_upper_paths_hook;
 	create_upper_paths_hook = upper_paths_hook;
 
+	prev_ExecutorRun = ExecutorRun_hook;
+	ExecutorRun_hook = qds_ExecutorRun;
+	prev_ExecutorFinish = ExecutorFinish_hook;
+	ExecutorFinish_hook = qds_ExecutorFinish;
 	prev_ExecutorEnd_hook = ExecutorEnd_hook;
 	ExecutorEnd_hook = qds_ExecutorEnd;
 
+#if PG_VERSION_NUM >= 180000
 	prev_explain_per_node_hook = explain_per_node_hook;
 	explain_per_node_hook = qds_per_node_hook;
 	prev_explain_validate_options_hook = explain_validate_options_hook;
 	explain_validate_options_hook = qds_explain_validate_options_hook;
 
-	prev_ExecutorRun = ExecutorRun_hook;
-	ExecutorRun_hook = qds_ExecutorRun;
-	prev_ExecutorFinish = ExecutorFinish_hook;
-	ExecutorFinish_hook = qds_ExecutorFinish;
-
 	RegisterExtensionExplainOption("extstat_candidates",
 									extstat_candidates_handler);
 	es_extension_id = GetExplainExtensionId(MODULE_NAME);
+#endif
 }
