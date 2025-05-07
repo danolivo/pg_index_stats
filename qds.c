@@ -23,8 +23,10 @@
 
 
 static bool enable_qds = true;
+static bool qds_log = false;
 static double estimation_error_threshold = 2.0;
 
+static ExecutorStart_hook_type prev_ExecutorStart = NULL;
 static create_upper_paths_hook_type prev_create_upper_paths_hook = NULL;
 static ExecutorFinish_hook_type prev_ExecutorFinish = NULL;
 static ExecutorRun_hook_type prev_ExecutorRun = NULL;
@@ -739,6 +741,37 @@ probe_candidate_node(PlanState *ps)
 	return true;
 }
 
+#include "nodes/makefuncs.h"
+#include "utils/lsyscache.h"
+
+/*
+ * Separate the logic in a single function just to reuse it in multiple places
+ */
+static List *
+get_canidate_expressions(CandidateQualEntry *entry)
+{
+	List				   *candidates = NIL;
+	int						i = -1;
+
+	if (entry == NULL)
+		return NIL;
+
+	while ((i = bms_next_member(entry->attnums, i)) > 0)
+	{
+		Var	   *var;
+		Oid		typid;
+		int32	typmod;
+		Oid		collid;
+
+		get_atttypetypmodcoll(entry->key.oid, i, &typid, &typmod, &collid);
+		var= makeVar(entry->key.relid, i, typid, typmod, collid, 0);
+		candidates = lappend(candidates, var);
+	}
+
+	candidates = list_concat(candidates, entry->exprs_list);
+	return candidates;
+}
+
 #if PG_VERSION_NUM >= 180000
 
 /* *****************************************************************************
@@ -773,8 +806,6 @@ show_expression(Node *node, const char *qlabel,
  *
  * ****************************************************************************/
 
-#include "nodes/makefuncs.h"
-#include "utils/lsyscache.h"
 static void
 qds_per_node_hook(PlanState *planstate, List *ancestors,
 				  const char *relationship, const char *plan_name,
@@ -851,10 +882,29 @@ qds_explain_validate_options_hook(struct ExplainState *es, List *options,
 
 int current_execution_level = 0;
 
+#if PG_VERSION_NUM >= 180000
+static bool
+qds_ExecutorStart(QueryDesc *queryDesc, int eflags)
+{
+	bool		plan_valid;
+
+	if (qds_log)
+	{
+		/* Force minimal instrumentation needed for the extension */
+		queryDesc->instrument_options |= INSTRUMENT_ROWS;
+	}
+
+	if (prev_ExecutorStart)
+		plan_valid = prev_ExecutorStart(queryDesc, eflags);
+	else
+		plan_valid = standard_ExecutorStart(queryDesc, eflags);
+
+	return plan_valid;
+}
+
 /*
  * ExecutorRun hook: all we need do is track nesting depth
  */
-#if (PG_VERSION_NUM >= 180000)
 static void
 qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count)
 {
@@ -874,6 +924,21 @@ qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count)
 }
 #else
 static void
+qds_ExecutorStart(QueryDesc *queryDesc, int eflags)
+{
+	if (qds_log)
+	{
+		/* Force minimal instrumentation needed for the extension */
+		queryDesc->instrument_options |= INSTRUMENT_ROWS;
+	}
+
+	if (prev_ExecutorStart)
+		prev_ExecutorStart(queryDesc, eflags);
+	else
+		standard_ExecutorStart(queryDesc, eflags);
+}
+
+static void
 qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count,
 				bool execute_once)
 {
@@ -892,26 +957,69 @@ qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count,
 	PG_END_TRY();
 }
 #endif
- /*
-  * ExecutorFinish hook: all we need do is track nesting depth
-  */
- static void
- qds_ExecutorFinish(QueryDesc *queryDesc)
- {
-	 current_execution_level++;
-	 PG_TRY();
-	 {
-		 if (prev_ExecutorFinish)
-			 prev_ExecutorFinish(queryDesc);
-		 else
-			 standard_ExecutorFinish(queryDesc);
-	 }
-	 PG_FINALLY();
-	 {
-		 current_execution_level--;
-	 }
-	 PG_END_TRY();
- }
+/*
+ * ExecutorFinish hook: all we need do is track nesting depth
+ */
+static void
+qds_ExecutorFinish(QueryDesc *queryDesc)
+{
+	current_execution_level++;
+	PG_TRY();
+	{
+		if (prev_ExecutorFinish)
+			prev_ExecutorFinish(queryDesc);
+		else
+			standard_ExecutorFinish(queryDesc);
+	}
+	PG_FINALLY();
+	{
+		current_execution_level--;
+	}
+	PG_END_TRY();
+}
+
+#include "lib/stringinfo.h"
+
+typedef struct CandidatesContext
+{
+	List		   *rtable;
+	StringInfoData	out;
+	bool			haveCandidates;
+} CandidatesContext;
+
+static bool
+show_candidates_walker(PlanState *ps, void *context)
+{
+	CandidatesContext *ctx = (CandidatesContext *) context;
+
+	if (ps == NULL)
+		return false;
+
+	if (probe_candidate_node(ps))
+		{
+			CandidateQualEntry *entry;
+			List			   *candidates;
+
+			/*
+			 * TODO: print to elog. But remember, we may be not in the top level
+			 * query.
+			 */
+			entry = fetch_candidate_entry(ps, ctx->rtable);
+			if (entry != NULL)
+			{
+				candidates = get_canidate_expressions(entry);
+				appendStringInfo(&ctx->out,
+								 "Relation: %s\n", get_rel_name(entry->key.oid));
+
+				appendStringInfo(&ctx->out,
+								 "Expressions: %s\n", nodeToString(candidates));
+
+				ctx->haveCandidates = true;
+			}
+		}
+
+	return planstate_tree_walker(ps, show_candidates_walker, context);
+}
 
 /*
  * This is the point where we can find out which clauses can be candidates to
@@ -926,16 +1034,30 @@ qds_ExecutorEnd(QueryDesc *queryDesc)
 {
 	PlanState  *ps = queryDesc->planstate;
 
-	if (queryDesc->instrument_options & INSTRUMENT_ROWS)
+	if (qds_log && queryDesc->instrument_options & INSTRUMENT_ROWS)
 	{
-		if (probe_candidate_node(ps))
-		{
-			/*
-			 * TODO: print to elog. But remember, we may be not in the top level
-			 * query.
-			 */
-			(void) fetch_candidate_entry(ps, queryDesc->plannedstmt->rtable);
-		}
+		CandidatesContext ctx;
+
+		/*
+		 * XXX:
+		 * For now, it makes no much sense because of bare expression string
+		 * full of internal info. We do it mostly for debugging.
+		 */
+		ctx.rtable = queryDesc->plannedstmt->rtable;
+		initStringInfo(&ctx.out);
+		ctx.haveCandidates = false;
+		appendStringInfo(&ctx.out,
+						 "\nBEGIN -----------------------------------------\n");
+		appendStringInfo(&ctx.out,
+						 "Show extstat's candidate clauses for the query:\n%s\n",
+						 queryDesc->sourceText);
+		show_candidates_walker(ps, (void *) &ctx);
+		appendStringInfo(&ctx.out,
+						 "--------------------------------------------- END\n");
+
+		if (ctx.haveCandidates)
+			elog(LOG, "%s", ctx.out.data);
+		pfree(ctx.out.data);
 	}
 
 	/* At the end, remove all the data */
@@ -964,6 +1086,17 @@ void qds_init(void)
 							NULL,
 							NULL);
 
+	DefineCustomBoolVariable(MODULE_NAME".qds_log",
+							"Print into the server log possible candidate clauses",
+							NULL,
+							&qds_log,
+							false,
+							PGC_SUSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
 	DefineCustomRealVariable(MODULE_NAME ".estimation_error_threshold",
 							"Planner estimation error deviation, above which "
 							"extended statistics is built",
@@ -981,6 +1114,8 @@ void qds_init(void)
 	prev_create_upper_paths_hook = create_upper_paths_hook;
 	create_upper_paths_hook = upper_paths_hook;
 
+	prev_ExecutorStart = ExecutorStart_hook;
+	ExecutorStart_hook = qds_ExecutorStart;
 	prev_ExecutorRun = ExecutorRun_hook;
 	ExecutorRun_hook = qds_ExecutorRun;
 	prev_ExecutorFinish = ExecutorFinish_hook;
