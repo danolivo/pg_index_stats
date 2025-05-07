@@ -45,6 +45,8 @@ static explain_per_node_hook_type prev_explain_per_node_hook = NULL;
 typedef double Cardinality;
 #endif
 
+static MemoryContext qds_local_memctx = NULL;
+
 /* *****************************************************************************
  *
  * Copy of extended_stat.c static routines
@@ -609,6 +611,10 @@ gather_compatible_clauses(PlannerInfo *root)
 
 			entry->attnums = bms_join(entry->attnums, attnums);
 			entry->exprs_list = list_concat(entry->exprs_list, exprs);
+
+			/* Put gathered data into the safe memory context */
+			entry->attnums = bms_copy(entry->attnums);
+			entry->exprs_list = copyObject(entry->exprs_list);
 		}
 	}
 	return true;
@@ -646,7 +652,7 @@ upper_paths_hook(PlannerInfo *root, UpperRelationKind stage,
 	}
 
 	/* Make any allocations outside current unsafe memory context */
-	oldctx = MemoryContextSwitchTo(CacheMemoryContext);
+	oldctx = MemoryContextSwitchTo(qds_local_memctx);
 
 	gather_compatible_clauses(root);
 
@@ -1063,8 +1069,11 @@ qds_ExecutorEnd(QueryDesc *queryDesc)
 	/* At the end, remove all the data */
 	if (current_execution_level == 0)
 	{
+		/* Instead of destroy may be just reset the memory context? */
 		hash_destroy(candidate_quals);
+
 		candidate_quals = NULL;
+		MemoryContextReset(qds_local_memctx);
 	}
 
 	if (prev_ExecutorEnd_hook)
@@ -1133,4 +1142,11 @@ void qds_init(void)
 									extstat_candidates_handler);
 	es_extension_id = GetExplainExtensionId(MODULE_NAME);
 #endif
+
+	if (qds_local_memctx == NULL)
+	{
+		qds_local_memctx = AllocSetContextCreate(CacheMemoryContext,
+												 MODULE_NAME" - QDS local memory context",
+												 ALLOCSET_DEFAULT_SIZES);
+	}
 }
