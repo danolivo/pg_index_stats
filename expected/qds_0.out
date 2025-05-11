@@ -102,7 +102,7 @@ SELECT * FROM check_estimated_rows('
 EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
 		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
 SELECT x,y FROM qds1 WHERE x IN (71) AND y > 33 AND y < 37
-; -- Two columns, but one of them is inequality
+; -- Two columns, but one of them is inequality. XXX: is this OK for all stat types?
 ERROR:  unrecognized EXPLAIN option "extstat_candidates"
 LINE 2:    BUFFERS OFF, EXTSTAT_CANDIDATES ON)
                         ^
@@ -120,5 +120,33 @@ SELECT x,y FROM qds1 WHERE x > 70 AND x < 72 AND x = 71
 ERROR:  unrecognized EXPLAIN option "extstat_candidates"
 LINE 2:    BUFFERS OFF, EXTSTAT_CANDIDATES ON)
                         ^
-DROP FUNCTION check_estimated_rows;
+-- TODO: Need to detect that we gather candidates recursively too
+CREATE FUNCTION recursive_execution()
+RETURNS bool
+AS $func$
+BEGIN
+  PERFORM x,y FROM qds1 WHERE x IN (71) AND y > 33 AND y < 37;
+  RETURN true;
+END;
+$func$ LANGUAGE PLPGSQL;
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT * FROM recursive_execution();
+ERROR:  unrecognized EXPLAIN option "extstat_candidates"
+LINE 2:    BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+                        ^
+-- Before we had a recommendation to build statistics on the (x,y).
+-- Now we have a stat, so no recommendations should be provided.
+ -- Unfortunately, it only works after an analyse. We may avoid it - see the
+-- get_relation_statistics routine, but will add more overhead. XXX: Is this
+-- worth it?
+CREATE STATISTICS qds1_x_y ON x,y FROM qds1;
+ANALYZE qds1;
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x IN (71) AND y > 33 AND y < 37;
+ERROR:  unrecognized EXPLAIN option "extstat_candidates"
+LINE 2:    BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+                        ^
+DROP FUNCTION recursive_execution;
 DROP EXTENSION pg_index_stats;

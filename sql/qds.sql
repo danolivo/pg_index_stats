@@ -77,5 +77,16 @@ EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
 		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
 SELECT * FROM recursive_execution();
 
+-- Before we had a recommendation to build statistics on the (x,y).
+-- Now we have a stat, so no recommendations should be provided.
+ -- Unfortunately, it only works after an analyse. We may avoid it - see the
+-- get_relation_statistics routine, but will add more overhead. XXX: Is this
+-- worth it?
+CREATE STATISTICS qds1_x_y ON x,y FROM qds1;
+ANALYZE qds1;
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x IN (71) AND y > 33 AND y < 37;
+
 DROP FUNCTION recursive_execution;
 DROP EXTENSION pg_index_stats;

@@ -172,5 +172,22 @@ SELECT * FROM recursive_execution();
  Function Scan on recursive_execution (actual rows=1.00 loops=1)
 (1 row)
 
+-- Before we had a recommendation to build statistics on the (x,y).
+-- Now we have a stat, so no recommendations should be provided.
+ -- Unfortunately, it only works after an analyse. We may avoid it - see the
+-- get_relation_statistics routine, but will add more overhead. XXX: Is this
+-- worth it?
+CREATE STATISTICS qds1_x_y ON x,y FROM qds1;
+ANALYZE qds1;
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT x,y FROM qds1 WHERE x IN (71) AND y > 33 AND y < 37;
+                   QUERY PLAN                   
+------------------------------------------------
+ Seq Scan on qds1 (actual rows=138.00 loops=1)
+   Filter: ((y > 33) AND (y < 37) AND (x = 71))
+   Rows Removed by Filter: 10862
+(3 rows)
+
 DROP FUNCTION recursive_execution;
 DROP EXTENSION pg_index_stats;
