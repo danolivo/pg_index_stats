@@ -55,7 +55,7 @@ SELECT * FROM check_estimated_rows('
 EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
 		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
 SELECT x,y FROM qds1 WHERE x IN (71) AND y > 33 AND y < 37
-; -- Two columns, but one of them is inequality
+; -- Two columns, but one of them is inequality. XXX: is this OK for all stat types?
 
 SELECT * FROM check_estimated_rows('
   SELECT x,y FROM qds1 WHERE x > 70 AND x < 72 AND x = 71');
@@ -64,5 +64,18 @@ EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
 SELECT x,y FROM qds1 WHERE x > 70 AND x < 72 AND x = 71
 ; -- The same column only, couple inequalities, no extended statistics
 
-DROP FUNCTION check_estimated_rows;
+-- TODO: Need to detect that we gather candidates recursively too
+CREATE FUNCTION recursive_execution()
+RETURNS bool
+AS $func$
+BEGIN
+  PERFORM x,y FROM qds1 WHERE x IN (71) AND y > 33 AND y < 37;
+  RETURN true;
+END;
+$func$ LANGUAGE PLPGSQL;
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF,
+		 BUFFERS OFF, EXTSTAT_CANDIDATES ON)
+SELECT * FROM recursive_execution();
+
+DROP FUNCTION recursive_execution;
 DROP EXTENSION pg_index_stats;
