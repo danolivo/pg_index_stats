@@ -650,9 +650,13 @@ gather_compatible_clauses(PlannerInfo *root)
 			Assert(rel->relid > 0 &&
 				   bms_get_singleton_member(rel->relids, &member) &&
 				   member == rel->relid);
-
+#if (PG_VERSION_NUM < 150000)
+			stat = choose_best_statistics(rel->statlist, STATS_EXT_MCV,
+										  &attnums, &exprs, 1);
+#else
 			stat = choose_best_statistics(rel->statlist, STATS_EXT_MCV, rte->inh,
 										  &attnums, &exprs, 1);
+#endif
 			if (stat && bms_is_subset(attnums, stat->keys) &&
 				stat_covers_expressions(stat, exprs, NULL))
 				/*
