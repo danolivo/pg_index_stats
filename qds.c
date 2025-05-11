@@ -7,6 +7,7 @@
 
 #include "postgres.h"
 
+#include "catalog/pg_statistic_ext_d.h"
 #include "commands/defrem.h"
 #include "commands/explain.h"
 #include "executor/executor.h"
@@ -412,6 +413,56 @@ statext_is_compatible_clause(PlannerInfo *root, Node *clause, Index relid,
 	return true;
 }
 
+static int
+stat_find_expression(StatisticExtInfo *stat, Node *expr)
+{
+	ListCell   *lc;
+	int			idx;
+
+	idx = 0;
+	foreach(lc, stat->exprs)
+	{
+		Node	   *stat_expr = (Node *) lfirst(lc);
+
+		if (equal(stat_expr, expr))
+			return idx;
+		idx++;
+	}
+
+	/* Expression not found */
+	return -1;
+}
+
+/*
+ * stat_covers_expressions
+ * 		Test whether a statistics object covers all expressions in a list.
+ *
+ * Returns true if all expressions are covered.  If expr_idxs is non-NULL, it
+ * is populated with the indexes of the expressions found.
+ */
+static bool
+stat_covers_expressions(StatisticExtInfo *stat, List *exprs,
+						Bitmapset **expr_idxs)
+{
+	ListCell   *lc;
+
+	foreach(lc, exprs)
+	{
+		Node	   *expr = (Node *) lfirst(lc);
+		int			expr_idx;
+
+		expr_idx = stat_find_expression(stat, expr);
+		if (expr_idx == -1)
+			return false;
+
+		if (expr_idxs != NULL)
+			*expr_idxs = bms_add_member(*expr_idxs, expr_idx);
+	}
+
+	/* If we reach here, all expressions are covered */
+	return true;
+}
+
 /* *****************************************************************************
  *
  * END OF COPIED FRAGMENT
@@ -594,10 +645,21 @@ gather_compatible_clauses(PlannerInfo *root)
 		{
 			CandidateQualEntryKey	key;
 			int						member;
+			StatisticExtInfo	   *stat;
 
 			Assert(rel->relid > 0 &&
 				   bms_get_singleton_member(rel->relids, &member) &&
 				   member == rel->relid);
+
+			stat = choose_best_statistics(rel->statlist, STATS_EXT_MCV, rte->inh,
+										  &attnums, &exprs, 1);
+			if (stat && bms_is_subset(attnums, stat->keys) &&
+				stat_covers_expressions(stat, exprs, NULL))
+				/*
+				 * This combination of columns and expressions already covered
+				 * by an existed statistic - ignore it.
+				 */
+				continue;
 
 			memset(&key, 0, sizeof(CandidateQualEntryKey));
 			key.oid = rte->relid;
@@ -609,6 +671,11 @@ gather_compatible_clauses(PlannerInfo *root)
 				entry->exprs_list = NIL;
 			}
 
+			/*
+			 * In case of nested execution, subqueries, etc we may find an entry
+			 * Put the issue out of current scope and just cancatenate
+			 * candidate clauses and attnums.
+			 */
 			entry->attnums = bms_join(entry->attnums, attnums);
 			entry->exprs_list = list_concat(entry->exprs_list, exprs);
 
