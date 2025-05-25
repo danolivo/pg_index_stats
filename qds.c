@@ -959,12 +959,9 @@ qds_explain_validate_options_hook(struct ExplainState *es, List *options,
 
 int current_execution_level = 0;
 
-#if PG_VERSION_NUM >= 180000
-static bool
+static void
 qds_ExecutorStart(QueryDesc *queryDesc, int eflags)
 {
-	bool		plan_valid;
-
 	if (qds_log)
 	{
 		/* Force minimal instrumentation needed for the extension */
@@ -972,13 +969,12 @@ qds_ExecutorStart(QueryDesc *queryDesc, int eflags)
 	}
 
 	if (prev_ExecutorStart)
-		plan_valid = prev_ExecutorStart(queryDesc, eflags);
+		prev_ExecutorStart(queryDesc, eflags);
 	else
-		plan_valid = standard_ExecutorStart(queryDesc, eflags);
-
-	return plan_valid;
+		standard_ExecutorStart(queryDesc, eflags);
 }
 
+#if PG_VERSION_NUM >= 180000
 /*
  * ExecutorRun hook: all we need do is track nesting depth
  */
@@ -1000,21 +996,6 @@ qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count)
 	PG_END_TRY();
 }
 #else
-static void
-qds_ExecutorStart(QueryDesc *queryDesc, int eflags)
-{
-	if (qds_log)
-	{
-		/* Force minimal instrumentation needed for the extension */
-		queryDesc->instrument_options |= INSTRUMENT_ROWS;
-	}
-
-	if (prev_ExecutorStart)
-		prev_ExecutorStart(queryDesc, eflags);
-	else
-		standard_ExecutorStart(queryDesc, eflags);
-}
-
 static void
 qds_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, uint64 count,
 				bool execute_once)
