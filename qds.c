@@ -609,6 +609,12 @@ typedef struct
 	List				   *exprs_list;
 } CandidateQualEntry;
 
+/*
+ * According to the current extended statistics implementation, MCV and
+ * dependencies statistics is needed for relation filters that lay, except very
+ * rare cases, at baserel RelOptInfos. Hence, the only simple_rel_array may be
+ * scrutinised.
+ */
 static bool
 gather_compatible_clauses(PlannerInfo *root)
 {
@@ -630,7 +636,9 @@ gather_compatible_clauses(PlannerInfo *root)
 		if (!(rte->rtekind == RTE_RELATION && rte->relkind == RELKIND_RELATION))
 			continue;
 
-		/* Gather all compatible columns and expressions */
+		/* Gather all compatible columns and expressions. TODO: separate search
+		 * for MCV and dependencies.
+		 */
 		foreach (lc, rel->baserestrictinfo)
 		{
 			RestrictInfo *rinfo = lfirst_node(RestrictInfo, lc);
@@ -661,8 +669,15 @@ gather_compatible_clauses(PlannerInfo *root)
 				stat_covers_expressions(stat, exprs, NULL))
 				/*
 				 * This combination of columns and expressions already covered
-				 * by an existed statistic - ignore it.
+				 * by an existing statistic - ignore it.
 				 */
+				continue;
+
+			/*
+			 * Now, let's check shared storage - may be someone already put
+			 * there this candidate (or covering definition).
+			 */
+			if (lookup_extstat_definition(attnums, exprs))
 				continue;
 
 			memset(&key, 0, sizeof(CandidateQualEntryKey));
@@ -697,17 +712,20 @@ upper_paths_hook(PlannerInfo *root, UpperRelationKind stage,
 {
 	MemoryContext oldctx;
 
+	/*
+	 * Let other extensions do their job. If an error raises we avoid unncessary
+	 * job - that is a rationale to do it in advance.
+	 */
 	if (prev_create_upper_paths_hook)
 		(*prev_create_upper_paths_hook) (root, stage,
 										 input_rel, output_rel, &extra);
 
-	if (estimation_error_threshold < 0.0)
+	if (estimation_error_threshold < 0. || !enable_qds)
+		/* It means, disabled feature */
 		return;
 
 	if (stage != UPPERREL_FINAL)
-		return;
-
-	if (!enable_qds)
+		/* Do it once at the final optimisation step */
 		return;
 
 	if (candidate_quals == NULL)
