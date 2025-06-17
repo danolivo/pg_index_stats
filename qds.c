@@ -677,7 +677,7 @@ gather_compatible_clauses(PlannerInfo *root)
 			 * Now, let's check shared storage - may be someone already put
 			 * there this candidate (or covering definition).
 			 */
-			if (lookup_extstat_definition(attnums, exprs))
+			if (lookup_extstat_definition(rte->relid, attnums, exprs))
 				continue;
 
 			memset(&key, 0, sizeof(CandidateQualEntryKey));

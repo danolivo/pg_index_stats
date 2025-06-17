@@ -37,6 +37,7 @@ extern Bitmapset *check_duplicated(List *statList, int32 stat_types);
 /* Query-based statistic generator routines */
 
 extern void qds_init(void);
-extern bool lookup_extstat_definition(Bitmapset *attnums, List *exprs);
+extern bool lookup_extstat_definition(Oid reloid,
+									  Bitmapset *attnums, List *exprs);
 
 #endif							/* PG_INDEX_STATS_H */
