@@ -60,25 +60,14 @@ static int extstat_columns_limit = 5; /* Don't allow to be too expensive */
 static bool combine_stats = true;
 
 
-/* Stuff for the explain extension */
-#if PG_VERSION_NUM >= 180000
+/* Stuff for the explain extension - shared between PG versions */
 #include "catalog/pg_statistic.h"
-#include "commands/explain_format.h"
-//#include "optimizer/planner.h"
 #include "utils/selfuncs.h"
 #include "utils/syscache.h"
 
-static int	es_extension_id = -1;
-static explain_per_plan_hook_type prev_explain_per_plan_hook = NULL;
+/* Hook variables - shared between PG versions */
 static get_relation_stats_hook_type prev_get_relation_stats_hook = NULL;
 static get_index_stats_hook_type prev_get_index_stats_hook = NULL;
-static ExplainOneQuery_hook_type prev_ExplainOneQuery_hook = NULL;
-
-static void table_stat_handler(ExplainState *es, DefElem *opt, ParseState *pstate);
-static void table_stat_per_plan_hook(PlannedStmt *plannedstmt, IntoClause *into,
-									 ExplainState *es, const char *queryString,
-									 ParamListInfo params,
-									 QueryEnvironment *queryEnv);
 
 typedef struct RelStatEntryKey
 {
@@ -128,6 +117,26 @@ static int explain_level = 0;
 
 static bool sc_enable = false;
 
+#if PG_VERSION_NUM >= 180000
+#include "commands/explain_format.h"
+
+static int	es_extension_id = -1;
+static explain_per_plan_hook_type prev_explain_per_plan_hook = NULL;
+static ExplainOneQuery_hook_type prev_ExplainOneQuery_hook = NULL;
+
+static void table_stat_handler(ExplainState *es, DefElem *opt, ParseState *pstate);
+static void table_stat_per_plan_hook(PlannedStmt *plannedstmt, IntoClause *into,
+									 ExplainState *es, const char *queryString,
+									 ParamListInfo params,
+									 QueryEnvironment *queryEnv);
+#else
+/* For PG < 18, we use a GUC to enable stats collection */
+static bool show_stat_guc = false;
+
+/* Forward declarations for PG < 18 */
+static void relation_stats_show_warning(void);
+#endif
+
 static bool
 index_stats_hook(PlannerInfo *root, Oid indexOid, AttrNumber indexattnum,
 				 VariableStatData *vardata)
@@ -155,7 +164,6 @@ relation_stats_hook(PlannerInfo *root, RangeTblEntry *rte, AttrNumber attnum,
 	RelStatEntry   *entry;
 	RelStatEntryKey	key;
 	bool			found;
-	int				i;
 
 	if (!sc_enable || rte->rtekind != RTE_RELATION)
 		return false;
@@ -195,6 +203,10 @@ relation_stats_hook(PlannerInfo *root, RangeTblEntry *rte, AttrNumber attnum,
 
 	memset(&key, 0, sizeof(RelStatEntryKey));
 
+#if PG_VERSION_NUM >= 180000
+	{
+	int				i;
+
 	for (i = 1; i < root->simple_rel_array_size; i++)
 	{
 		if (root->simple_rte_array[i] != rte)
@@ -206,6 +218,14 @@ relation_stats_hook(PlannerInfo *root, RangeTblEntry *rte, AttrNumber attnum,
 
 	/* Use the index instead of oid to see which statistics was used */
 	key.relid = i;
+	}
+#else
+	/*
+	 * For PG < 18, store the actual relid since we don't have access to the
+	 * rtable when displaying the statistics as a WARNING.
+	 */
+	key.relid = rte->relid;
+#endif
 
 	key.attnum = attnum;
 	entry = hash_search(sc_htab, &key, HASH_ENTER, &found);
@@ -285,6 +305,7 @@ relation_stats_hook(PlannerInfo *root, RangeTblEntry *rte, AttrNumber attnum,
 	return false;
 }
 
+#if PG_VERSION_NUM >= 180000
 static void
 sc_ExplainOneQuery_hook(Query *query, int cursorOptions, IntoClause *into,
 						struct ExplainState *es, const char *queryString,
@@ -340,7 +361,142 @@ sc_ExplainOneQuery_hook(Query *query, int cursorOptions, IntoClause *into,
 	PG_END_TRY();
 }
 
-#endif
+#else /* PG_VERSION_NUM < 180000 */
+
+#include "parser/parsetree.h"
+
+/*
+ * For PG < 18, output statistics as a WARNING message since we don't have
+ * the explain_per_plan_hook to add output to EXPLAIN.
+ */
+static void
+relation_stats_show_warning(void)
+{
+	HASH_SEQ_STATUS	status;
+	RelStatEntry   *entry;
+	StringInfoData	buf;
+
+	if (sc_htab == NULL || hash_get_num_entries(sc_htab) == 0)
+	{
+		ereport(WARNING,
+				(errmsg("No statistics used during the query planning")));
+		return;
+	}
+
+	initStringInfo(&buf);
+	appendStringInfo(&buf, "Statistics used during query planning:\n");
+
+	hash_seq_init(&status, sc_htab);
+	while ((entry = (RelStatEntry *) hash_seq_search(&status)) != NULL)
+	{
+		char	   *relname;
+		char	   *attname;
+		Oid			relid;
+
+		/*
+		 * For PG < 18 we store relid directly (not the RTE index) since we
+		 * don't have access to the rtable at display time.
+		 */
+		relid = entry->key.relid;
+		relname = get_rel_name(relid);
+		attname = get_attname(relid, entry->key.attnum, false);
+
+		if (relname == NULL || attname == NULL)
+			continue;
+
+		appendStringInfo(&buf, "  %s.%s: %d times, stats: {",
+						 relname, attname, entry->freq);
+
+		if (entry->mcv)
+			appendStringInfo(&buf, " MCV: %d values,", entry->mcv_nvalues);
+		if (entry->hist)
+			appendStringInfo(&buf, " Histogram: %d values,", entry->hist_nvalues);
+		if (entry->dec_hist)
+			appendStringInfo(&buf, " Dist histogram: %d values,", entry->dec_hist_nvalues);
+		if (entry->mcelems)
+			appendStringInfo(&buf, " MC Elements: %d values,", entry->mcelems_nvalues);
+		if (entry->range_hist)
+			appendStringInfo(&buf, " Range histogram: %d values,", entry->range_hist_nvalues);
+		if (entry->corr)
+			appendStringInfo(&buf, " Correlation,");
+
+		appendStringInfo(&buf, " ndistinct: %.4lf, nullfrac: %.4lf, width: %.0lf",
+						 entry->stadistinct, entry->stanullfrac, entry->stawidth);
+		appendStringInfo(&buf, " }\n");
+	}
+
+	ereport(WARNING,
+			(errmsg_internal("%s", buf.data)));
+
+	pfree(buf.data);
+}
+
+/*
+ * Hook to enable/disable stats collection based on GUC for PG < 18.
+ * We hook into the planner to manage the explain_level and stats collection.
+ */
+#include "optimizer/planner.h"
+
+static planner_hook_type prev_planner_hook = NULL;
+
+static PlannedStmt *
+sc_planner_hook(Query *parse, const char *query_string, int cursorOptions,
+				ParamListInfo boundParams)
+{
+	PlannedStmt *result;
+	bool		was_enabled = sc_enable;
+
+	/* Enable stats collection if GUC is set and we're at level 0 */
+	if (show_stat_guc && explain_level == 0)
+	{
+		explain_level = 1;
+		sc_enable = true;
+	}
+
+	PG_TRY();
+	{
+		if (prev_planner_hook)
+			result = prev_planner_hook(parse, query_string, cursorOptions, boundParams);
+		else
+			result = standard_planner(parse, query_string, cursorOptions, boundParams);
+	}
+	PG_CATCH();
+	{
+		/* Cleanup on error */
+		if (!was_enabled && sc_enable)
+		{
+			sc_enable = false;
+			explain_level = 0;
+
+			if (sc_htab != NULL)
+			{
+				hash_destroy(sc_htab);
+				sc_htab = NULL;
+			}
+		}
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+
+	/* Show stats as WARNING after planning completes */
+	if (!was_enabled && sc_enable)
+	{
+		relation_stats_show_warning();
+
+		sc_enable = false;
+		explain_level = 0;
+
+		if (sc_htab != NULL)
+		{
+			hash_destroy(sc_htab);
+			sc_htab = NULL;
+		}
+	}
+
+	return result;
+}
+
+#endif /* PG_VERSION_NUM >= 180000 */
 
 
 /* Local Memory Context to avoid multiple free commands */
@@ -863,6 +1019,23 @@ _PG_init(void)
 								NULL,
 								NULL);
 
+#if PG_VERSION_NUM < 180000
+	/*
+	 * For PG < 18, we use a GUC to enable stats collection since we can't
+	 * add custom EXPLAIN options.
+	 */
+	DefineCustomBoolVariable(MODULE_NAME".show_stat",
+								"Show statistics used during query planning as WARNING",
+								"Enable to output statistics info via WARNING messages during planning",
+								&show_stat_guc,
+								false,
+								PGC_USERSET,
+								0,
+								NULL,
+								NULL,
+								NULL);
+#endif
+
 	next_object_access_hook = object_access_hook;
 	object_access_hook = extstat_remember_index_hook;
 
@@ -879,6 +1052,11 @@ _PG_init(void)
 	MarkGUCPrefixReserved(MODULE_NAME);
 #endif
 
+	/* Hook into stats hooks - works for all PG versions */
+	prev_get_relation_stats_hook = get_relation_stats_hook;
+	get_relation_stats_hook = relation_stats_hook;
+	prev_get_index_stats_hook = get_index_stats_hook;
+	get_index_stats_hook = index_stats_hook;
 
 #if PG_VERSION_NUM >= 180000
 	RegisterExtensionExplainOption("stat", table_stat_handler);
@@ -887,12 +1065,12 @@ _PG_init(void)
 	prev_explain_per_plan_hook = explain_per_plan_hook;
 	explain_per_plan_hook = table_stat_per_plan_hook;
 
-	prev_get_relation_stats_hook = get_relation_stats_hook;
-	get_relation_stats_hook = relation_stats_hook;
 	prev_ExplainOneQuery_hook = ExplainOneQuery_hook;
 	ExplainOneQuery_hook = sc_ExplainOneQuery_hook;
-	prev_get_index_stats_hook = get_index_stats_hook;
-	get_index_stats_hook = index_stats_hook;
+#else
+	/* For PG < 18, use planner_hook to manage stats collection lifecycle */
+	prev_planner_hook = planner_hook;
+	planner_hook = sc_planner_hook;
 #endif
 
 	qds_init();
